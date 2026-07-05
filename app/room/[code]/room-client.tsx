@@ -6,7 +6,6 @@ import {
   FileText,
   FileUp,
   LinkIcon,
-  Paperclip,
   Pin,
   PinOff,
   QrCode,
@@ -18,6 +17,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
+import { ImagesBadge } from "@/components/ui/images-badge";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { BridgeFile, BridgeMessage, Room } from "@/lib/types";
 import { cn, detectMessageType, formatFileSize, formatTime } from "@/lib/utils";
@@ -33,6 +33,11 @@ type TimelineItem =
   | { kind: "file"; created_at: string; item: BridgeFile };
 
 const storageBucket = "textbridge-files";
+const uploadBadgeImages = [
+  "https://assets.aceternity.com/pro/agenforce-1.webp",
+  "https://assets.aceternity.com/pro/agenforce-2.webp",
+  "https://assets.aceternity.com/pro/agenforce-3.webp",
+];
 
 export default function RoomClient({ code }: RoomClientProps) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -386,7 +391,11 @@ export default function RoomClient({ code }: RoomClientProps) {
                   className="grid h-12 place-items-center rounded-lg border border-slate-800 text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Upload file"
                 >
-                  {uploading ? <FileUp className="size-5 animate-pulse" /> : <Paperclip className="size-5" />}
+                  {uploading ? (
+                    <FileUp className="size-5 animate-pulse" />
+                  ) : (
+                    <ImagesBadge images={uploadBadgeImages} className="border-0 bg-transparent px-0 py-0 shadow-none" />
+                  )}
                 </button>
               </div>
               <input ref={fileInputRef} onChange={uploadFile} type="file" className="hidden" />
