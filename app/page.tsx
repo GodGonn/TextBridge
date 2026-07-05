@@ -3,6 +3,7 @@
 import { ArrowRight, Check, Copy, FileUp, Moon, Plus, QrCode, Smartphone, Sun, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { GridBackground } from "@/components/grid-background";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { cn, generateRoomCode } from "@/lib/utils";
 
@@ -79,7 +80,10 @@ export default function HomePage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden px-4 py-5 sm:px-6 lg:px-8">
+    <main className="relative isolate min-h-screen overflow-hidden px-4 py-5 font-sans sm:px-6 lg:px-8">
+      <GridBackground />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_28rem)] dark:bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28rem)]" />
+
       <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] w-full max-w-6xl flex-col">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
