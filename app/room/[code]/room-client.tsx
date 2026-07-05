@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { GridBackground } from "@/components/grid-background";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { BridgeFile, BridgeMessage, Room } from "@/lib/types";
 import { cn, detectMessageType, formatFileSize, formatTime } from "@/lib/utils";
@@ -317,8 +318,9 @@ export default function RoomClient({ code }: RoomClientProps) {
   }
 
   return (
-    <main className="min-h-screen px-3 py-3 font-mono sm:px-5 lg:px-6">
-      <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[20rem_1fr]">
+    <main className="relative isolate min-h-screen overflow-hidden px-3 py-3 font-mono sm:px-5 lg:px-6">
+      <GridBackground size={32} />
+      <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[20rem_1fr]">
         <aside className="rounded-xl border border-slate-800 bg-slate-950/90 p-4 shadow-sm backdrop-blur lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
           <div>
             <p className="text-sm font-medium text-slate-400">Room Code</p>
