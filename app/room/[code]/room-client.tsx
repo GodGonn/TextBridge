@@ -394,7 +394,7 @@ export default function RoomClient({ code }: RoomClientProps) {
                   {uploading ? (
                     <FileUp className="size-5 animate-pulse" />
                   ) : (
-                    <ImagesBadge images={uploadBadgeImages} className="border-0 bg-transparent px-0 py-0 shadow-none" />
+                    <ImagesBadge images={uploadBadgeImages} />
                   )}
                 </button>
               </div>
