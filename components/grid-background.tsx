@@ -7,7 +7,7 @@ type GridBackgroundProps = React.ComponentProps<"div"> & {
 
 export function GridBackground({
   size = 32,
-  fill = "rgba(14, 165, 233, 0.16)",
+  fill = "rgba(148, 163, 184, 0.14)",
   className,
   style,
   ...props
@@ -16,7 +16,7 @@ export function GridBackground({
     <div
       aria-hidden="true"
       className={cn(
-        "pointer-events-none absolute inset-0 -z-10 size-full [mask-image:radial-gradient(ellipse_at_center,black,transparent_72%)]",
+        "pointer-events-none absolute inset-0 -z-10 size-full [mask-image:radial-gradient(ellipse_at_center,black,transparent_74%)]",
         className,
       )}
       style={{

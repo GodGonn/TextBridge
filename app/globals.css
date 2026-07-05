@@ -20,10 +20,7 @@ html {
 body {
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 30rem),
-    radial-gradient(circle at bottom right, rgba(2, 132, 199, 0.10), transparent 34rem),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
@@ -35,5 +32,5 @@ textarea {
 }
 
 ::selection {
-  background: rgba(14, 165, 233, 0.24);
+  background: rgba(148, 163, 184, 0.28);
 }
