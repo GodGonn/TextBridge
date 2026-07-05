@@ -1,27 +1,51 @@
 "use client";
 
-import { Copy, LinkIcon, Moon, Pin, PinOff, QrCode, Send, Sun, Trash2, Wifi, WifiOff } from "lucide-react";
+import {
+  Copy,
+  Download,
+  FileUp,
+  LinkIcon,
+  Moon,
+  Paperclip,
+  Pin,
+  PinOff,
+  QrCode,
+  Send,
+  Sun,
+  Trash2,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import type { BridgeMessage, Room } from "@/lib/types";
-import { cn, formatTime } from "@/lib/utils";
+import type { BridgeFile, BridgeMessage, Room } from "@/lib/types";
+import { cn, detectMessageType, formatFileSize, formatTime } from "@/lib/utils";
 
 type RoomClientProps = {
   code: string;
 };
 
 type BridgeMode = "supabase" | "local" | null;
+type Status = "connecting" | "online" | "local" | "error";
+type TimelineItem =
+  | { kind: "message"; created_at: string; item: BridgeMessage }
+  | { kind: "file"; created_at: string; item: BridgeFile };
+
+const storageBucket = "textbridge-files";
 
 export default function RoomClient({ code }: RoomClientProps) {
   const [room, setRoom] = useState<Room | null>(null);
   const [messages, setMessages] = useState<BridgeMessage[]>([]);
+  const [files, setFiles] = useState<BridgeFile[]>([]);
   const [text, setText] = useState("");
   const [mode, setMode] = useState<BridgeMode>(null);
-  const [status, setStatus] = useState<"connecting" | "online" | "local" | "error">("connecting");
+  const [status, setStatus] = useState<Status>("connecting");
   const [notice, setNotice] = useState("");
   const [copiedId, setCopiedId] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [dark, setDark] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const roomUrl = useMemo(() => {
@@ -29,11 +53,16 @@ export default function RoomClient({ code }: RoomClientProps) {
     return `${window.location.origin}/room/${code}`;
   }, [code]);
 
-  const sortedMessages = useMemo(() => {
-    return [...messages]
-      .filter((message) => !message.deleted_at)
-      .sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  }, [messages]);
+  const timeline = useMemo<TimelineItem[]>(() => {
+    return [
+      ...messages.filter((message) => !message.deleted_at).map((item) => ({ kind: "message" as const, created_at: item.created_at, item })),
+      ...files.filter((file) => !file.deleted_at).map((item) => ({ kind: "file" as const, created_at: item.created_at, item })),
+    ].sort((a, b) => {
+      const aPinned = a.kind === "message" && a.item.is_pinned ? 1 : 0;
+      const bPinned = b.kind === "message" && b.item.is_pinned ? 1 : 0;
+      return bPinned - aPinned || new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }, [files, messages]);
 
   useEffect(() => {
     const stored = localStorage.getItem("textbridge-theme");
@@ -47,17 +76,18 @@ export default function RoomClient({ code }: RoomClientProps) {
 
     async function loadLocalRoom() {
       const roomResponse = await fetch(`/api/rooms/${code}`, { cache: "no-store" });
-      if (!roomResponse.ok) {
-        throw new Error("ไม่พบห้องนี้ กรุณาสร้างห้องใหม่หรือเช็ก Room Code");
-      }
+      if (!roomResponse.ok) throw new Error("ไม่พบห้องนี้ กรุณาสร้างห้องใหม่หรือเช็ก Room Code");
 
       const roomData = (await roomResponse.json()) as Room;
-      const messageResponse = await fetch(`/api/rooms/${code}/messages`, { cache: "no-store" });
-      const messageData = messageResponse.ok ? ((await messageResponse.json()) as BridgeMessage[]) : [];
+      const [messageResponse, fileResponse] = await Promise.all([
+        fetch(`/api/rooms/${code}/messages`, { cache: "no-store" }),
+        fetch(`/api/rooms/${code}/files`, { cache: "no-store" }),
+      ]);
 
       if (!isMounted) return;
       setRoom(roomData);
-      setMessages(messageData);
+      setMessages(messageResponse.ok ? ((await messageResponse.json()) as BridgeMessage[]) : []);
+      setFiles(fileResponse.ok ? ((await fileResponse.json()) as BridgeFile[]) : []);
       setMode("local");
       setStatus("local");
       setNotice("ใช้ Local network mode เพราะ Supabase ยังติดต่อไม่ได้");
@@ -77,23 +107,24 @@ export default function RoomClient({ code }: RoomClientProps) {
 
           if (roomError) throw roomError;
           if (roomData) {
-            const { data: messageData, error: messageError } = await supabase
-              .from("messages")
-              .select("*")
-              .eq("room_id", roomData.id)
-              .is("deleted_at", null)
-              .order("created_at", { ascending: true });
+            const [messageResult, fileResult] = await Promise.all([
+              supabase.from("messages").select("*").eq("room_id", roomData.id).is("deleted_at", null).order("created_at", { ascending: true }),
+              supabase.from("files").select("*").eq("room_id", roomData.id).is("deleted_at", null).order("created_at", { ascending: true }),
+            ]);
 
-            if (messageError) throw messageError;
+            if (messageResult.error) throw messageResult.error;
+            if (fileResult.error) throw fileResult.error;
             if (!isMounted) return;
+
             setRoom(roomData);
-            setMessages(messageData ?? []);
+            setMessages(messageResult.data ?? []);
+            setFiles(fileResult.data ?? []);
             setMode("supabase");
             setStatus("online");
             return;
           }
         } catch {
-          // Fall through to the local network API so the app remains usable while Supabase is unavailable.
+          // Keep the app usable locally if Supabase is temporarily unavailable.
         }
       }
 
@@ -123,11 +154,15 @@ export default function RoomClient({ code }: RoomClientProps) {
         { event: "*", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` },
         (payload) => {
           const next = (payload.new || payload.old) as BridgeMessage;
-          setMessages((current) => {
-            if (payload.eventType === "DELETE") return current.filter((message) => message.id !== next.id);
-            const exists = current.some((message) => message.id === next.id);
-            return exists ? current.map((message) => (message.id === next.id ? next : message)) : [...current, next];
-          });
+          setMessages((current) => upsertRealtimeRow(current, next, payload.eventType));
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "files", filter: `room_id=eq.${room.id}` },
+        (payload) => {
+          const next = (payload.new || payload.old) as BridgeFile;
+          setFiles((current) => upsertRealtimeRow(current, next, payload.eventType));
         },
       )
       .subscribe((nextStatus) => {
@@ -143,10 +178,13 @@ export default function RoomClient({ code }: RoomClientProps) {
     if (mode !== "local") return;
 
     const interval = window.setInterval(async () => {
-      const response = await fetch(`/api/rooms/${code}/messages`, { cache: "no-store" });
-      if (response.ok) {
-        setMessages((await response.json()) as BridgeMessage[]);
-      }
+      const [messageResponse, fileResponse] = await Promise.all([
+        fetch(`/api/rooms/${code}/messages`, { cache: "no-store" }),
+        fetch(`/api/rooms/${code}/files`, { cache: "no-store" }),
+      ]);
+
+      if (messageResponse.ok) setMessages((await messageResponse.json()) as BridgeMessage[]);
+      if (fileResponse.ok) setFiles((await fileResponse.json()) as BridgeFile[]);
     }, 1000);
 
     return () => window.clearInterval(interval);
@@ -154,7 +192,7 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages]);
+  }, [timeline.length]);
 
   function toggleTheme() {
     const next = !dark;
@@ -174,7 +212,7 @@ export default function RoomClient({ code }: RoomClientProps) {
       const { error } = await supabase.from("messages").insert({
         room_id: room.id,
         text: clean,
-        type: detectMessageKind(clean),
+        type: detectMessageType(clean),
         is_pinned: false,
       });
       if (error) {
@@ -198,6 +236,50 @@ export default function RoomClient({ code }: RoomClientProps) {
 
     const message = (await response.json()) as BridgeMessage;
     setMessages((current) => [...current, message]);
+  }
+
+  async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
+    const upload = event.target.files?.[0];
+    if (!upload || !room || !mode) return;
+
+    setUploading(true);
+    setNotice("");
+
+    try {
+      if (mode === "supabase" && supabase) {
+        const storagePath = `${room.id}/${crypto.randomUUID()}-${sanitizeFileName(upload.name)}`;
+        const { error: uploadError } = await supabase.storage.from(storageBucket).upload(storagePath, upload, {
+          contentType: upload.type || "application/octet-stream",
+          upsert: false,
+        });
+        if (uploadError) throw uploadError;
+
+        const { data: publicData } = supabase.storage.from(storageBucket).getPublicUrl(storagePath);
+        const { error: insertError } = await supabase.from("files").insert({
+          room_id: room.id,
+          file_name: upload.name,
+          file_url: publicData.publicUrl,
+          file_type: upload.type || "application/octet-stream",
+          file_size: upload.size,
+        });
+        if (insertError) throw insertError;
+      } else {
+        const formData = new FormData();
+        formData.append("file", upload);
+        const response = await fetch(`/api/rooms/${code}/files`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) throw new Error("อัปโหลดไฟล์ไม่สำเร็จ");
+        const file = (await response.json()) as BridgeFile;
+        setFiles((current) => [...current, file]);
+      }
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "อัปโหลดไฟล์ไม่สำเร็จ");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   async function copyMessage(message: BridgeMessage) {
@@ -227,6 +309,27 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   async function deleteMessage(id: string) {
     await updateMessage(id, { deleted_at: new Date().toISOString() });
+  }
+
+  async function deleteFile(id: string) {
+    const patch = { deleted_at: new Date().toISOString() };
+
+    if (mode === "supabase" && supabase) {
+      const { error } = await supabase.from("files").update(patch).eq("id", id);
+      if (error) setNotice(error.message);
+      return;
+    }
+
+    const response = await fetch(`/api/rooms/${code}/files/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+
+    if (response.ok) {
+      const updated = (await response.json()) as BridgeFile;
+      setFiles((current) => current.map((file) => (file.id === id ? updated : file)));
+    }
   }
 
   return (
@@ -273,7 +376,7 @@ export default function RoomClient({ code }: RoomClientProps) {
           </div>
 
           <div className="mt-4 rounded-lg bg-bridge-50 p-3 text-sm text-bridge-900 dark:bg-bridge-500/10 dark:text-bridge-100">
-            เปิดหน้านี้บนคอม แล้วสแกน QR ด้วยมือถือ จากนั้นส่งข้อความเพื่อให้ขึ้นทันทีบนอีกเครื่อง
+            เปิดหน้านี้บนคอม แล้วสแกน QR ด้วยมือถือ จากนั้นส่งข้อความหรือไฟล์ให้ขึ้นทันทีบนอีกเครื่อง
           </div>
         </aside>
 
@@ -286,60 +389,53 @@ export default function RoomClient({ code }: RoomClientProps) {
                 placeholder="Paste text, link, code, email, phone number..."
                 className="min-h-14 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-bridge-500 focus:ring-4 focus:ring-bridge-100 dark:border-slate-800 dark:bg-slate-900 dark:focus:ring-bridge-500/20"
               />
-              <button
-                disabled={!text.trim() || !room}
-                className="grid size-14 shrink-0 place-items-center rounded-lg bg-bridge-600 text-white transition hover:bg-bridge-700 disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="Send message"
-              >
-                <Send className="size-5" />
-              </button>
+              <div className="flex shrink-0 flex-col gap-2">
+                <button
+                  disabled={!text.trim() || !room}
+                  className="grid size-14 place-items-center rounded-lg bg-bridge-600 text-white transition hover:bg-bridge-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Send message"
+                >
+                  <Send className="size-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!room || uploading}
+                  className="grid size-14 place-items-center rounded-lg border border-slate-200 text-slate-700 transition hover:border-bridge-500 hover:text-bridge-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:text-slate-200 dark:hover:text-bridge-100"
+                  aria-label="Upload file"
+                >
+                  {uploading ? <FileUp className="size-5 animate-pulse" /> : <Paperclip className="size-5" />}
+                </button>
+              </div>
+              <input ref={fileInputRef} onChange={uploadFile} type="file" className="hidden" />
             </form>
             {notice ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-100">{notice}</p> : null}
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
-            {sortedMessages.length === 0 ? (
+            {timeline.length === 0 ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-slate-300 text-center dark:border-slate-700">
                 <div>
-                  <p className="font-semibold text-slate-800 dark:text-slate-100">ยังไม่มีข้อความในห้องนี้</p>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">ส่งลิงก์ โค้ด หรือโน้ตแรกเพื่อเริ่ม bridge ได้เลย</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">ยังไม่มีข้อความหรือไฟล์ในห้องนี้</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">ส่งลิงก์ โค้ด โน้ต หรือไฟล์แรกเพื่อเริ่ม bridge ได้เลย</p>
                 </div>
               </div>
             ) : (
               <div className="space-y-3">
-                {sortedMessages.map((message) => (
-                  <article
-                    key={message.id}
-                    className={cn(
-                      "rounded-lg border p-3 transition",
-                      message.is_pinned
-                        ? "border-bridge-200 bg-bridge-50 dark:border-bridge-500/30 dark:bg-bridge-500/10"
-                        : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900",
-                    )}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                        <span className="rounded-full bg-white px-2 py-1 font-medium uppercase dark:bg-slate-950">{message.type}</span>
-                        <span>{formatTime(message.created_at)}</span>
-                        {message.is_pinned ? <span className="text-bridge-700 dark:text-bridge-100">Pinned</span> : null}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <IconButton label={copiedId === message.id ? "Copied" : "Copy"} onClick={() => copyMessage(message)}>
-                          <Copy className="size-4" />
-                        </IconButton>
-                        <IconButton label={message.is_pinned ? "Unpin" : "Pin"} onClick={() => updateMessage(message.id, { is_pinned: !message.is_pinned })}>
-                          {message.is_pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                        </IconButton>
-                        <IconButton label="Delete" onClick={() => deleteMessage(message.id)}>
-                          <Trash2 className="size-4" />
-                        </IconButton>
-                      </div>
-                    </div>
-                    <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800 dark:text-slate-100">
-                      {message.text}
-                    </pre>
-                  </article>
-                ))}
+                {timeline.map((entry) =>
+                  entry.kind === "message" ? (
+                    <MessageCard
+                      key={`message-${entry.item.id}`}
+                      message={entry.item}
+                      copied={copiedId === entry.item.id}
+                      onCopy={() => copyMessage(entry.item)}
+                      onPin={() => updateMessage(entry.item.id, { is_pinned: !entry.item.is_pinned })}
+                      onDelete={() => deleteMessage(entry.item.id)}
+                    />
+                  ) : (
+                    <FileCard key={`file-${entry.item.id}`} file={entry.item} onDelete={() => deleteFile(entry.item.id)} />
+                  ),
+                )}
                 <div ref={endRef} />
               </div>
             )}
@@ -350,12 +446,84 @@ export default function RoomClient({ code }: RoomClientProps) {
   );
 }
 
-function detectMessageKind(text: string) {
-  if (/^https?:\/\//i.test(text.trim())) return "link";
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim())) return "email";
-  if (/^\+?[\d\s().-]{8,}$/.test(text.trim())) return "phone";
-  if (/[{};]|```|\b(const|let|function|class|import|SELECT)\b/i.test(text)) return "code";
-  return "text";
+function MessageCard({
+  message,
+  copied,
+  onCopy,
+  onPin,
+  onDelete,
+}: {
+  message: BridgeMessage;
+  copied: boolean;
+  onCopy: () => void;
+  onPin: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <article
+      className={cn(
+        "rounded-lg border p-3 transition",
+        message.is_pinned
+          ? "border-bridge-200 bg-bridge-50 dark:border-bridge-500/30 dark:bg-bridge-500/10"
+          : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span className="rounded-full bg-white px-2 py-1 font-medium uppercase dark:bg-slate-950">{message.type}</span>
+          <span>{formatTime(message.created_at)}</span>
+          {message.is_pinned ? <span className="text-bridge-700 dark:text-bridge-100">Pinned</span> : null}
+        </div>
+        <div className="flex items-center gap-1">
+          <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy}>
+            <Copy className="size-4" />
+          </IconButton>
+          <IconButton label={message.is_pinned ? "Unpin" : "Pin"} onClick={onPin}>
+            {message.is_pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+          </IconButton>
+          <IconButton label="Delete" onClick={onDelete}>
+            <Trash2 className="size-4" />
+          </IconButton>
+        </div>
+      </div>
+      <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800 dark:text-slate-100">
+        {message.text}
+      </pre>
+    </article>
+  );
+}
+
+function FileCard({ file, onDelete }: { file: BridgeFile; onDelete: () => void }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="rounded-full bg-white px-2 py-1 font-medium uppercase dark:bg-slate-950">file</span>
+            <span>{formatTime(file.created_at)}</span>
+            <span>{formatFileSize(file.file_size)}</span>
+          </div>
+          <p className="mt-2 break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{file.file_name}</p>
+          <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">{file.file_type || "application/octet-stream"}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <a
+            href={file.file_url}
+            download={file.file_name}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-white hover:text-bridge-700 dark:text-slate-300 dark:hover:bg-slate-950 dark:hover:text-bridge-100"
+          >
+            <Download className="size-4" />
+            <span className="hidden sm:inline">Download</span>
+          </a>
+          <IconButton label="Delete" onClick={onDelete}>
+            <Trash2 className="size-4" />
+          </IconButton>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function IconButton({
@@ -377,4 +545,14 @@ function IconButton({
       <span className="hidden sm:inline">{label}</span>
     </button>
   );
+}
+
+function upsertRealtimeRow<T extends { id: string }>(current: T[], next: T, eventType: string) {
+  if (eventType === "DELETE") return current.filter((row) => row.id !== next.id);
+  const exists = current.some((row) => row.id === next.id);
+  return exists ? current.map((row) => (row.id === next.id ? next : row)) : [...current, next];
+}
+
+function sanitizeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }

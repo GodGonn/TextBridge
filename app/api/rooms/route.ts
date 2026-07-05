@@ -22,7 +22,7 @@ export async function POST() {
 
   localStore.rooms.set(code, room);
   localStore.messages.set(room.id, []);
+  localStore.files.set(room.id, []);
 
   return NextResponse.json(room);
 }
-

@@ -19,3 +19,15 @@ export type Room = {
   created_by: string | null;
   is_private: boolean;
 };
+
+export type BridgeFile = {
+  id: string;
+  room_id: string;
+  file_name: string;
+  file_url: string;
+  file_type: string;
+  file_size: number;
+  created_at: string;
+  expired_at: string | null;
+  deleted_at: string | null;
+};

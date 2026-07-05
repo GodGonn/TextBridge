@@ -19,6 +19,20 @@ export function formatTime(value: string | Date) {
   }).format(new Date(value));
 }
 
+export function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
 export function detectMessageType(text: string) {
   if (/^https?:\/\//i.test(text.trim())) return "link";
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim())) return "email";
