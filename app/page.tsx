@@ -121,12 +121,6 @@ export default function HomePage() {
           </form>
 
           {error ? <p className="mt-4 rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</p> : null}
-
-          <p className="mt-5 text-sm leading-6 text-slate-400">
-            {isSupabaseConfigured
-              ? "Supabase พร้อมใช้งาน ถ้าเชื่อมต่อไม่ได้ระบบจะ fallback เป็น local network ให้อัตโนมัติ"
-              : "Local network mode: ใช้งานได้เมื่ออุปกรณ์อยู่ Wi-Fi เดียวกัน"}
-          </p>
         </section>
       </div>
     </main>
