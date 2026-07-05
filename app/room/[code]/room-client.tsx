@@ -6,13 +6,11 @@ import {
   FileText,
   FileUp,
   LinkIcon,
-  Moon,
   Paperclip,
   Pin,
   PinOff,
   QrCode,
   Send,
-  Sun,
   Trash2,
   Wifi,
   WifiOff,
@@ -45,7 +43,6 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [notice, setNotice] = useState("");
   const [copiedId, setCopiedId] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [dark, setDark] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -64,13 +61,6 @@ export default function RoomClient({ code }: RoomClientProps) {
       return bPinned - aPinned || new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
   }, [files, messages]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("textbridge-theme");
-    const shouldUseDark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setDark(shouldUseDark);
-    document.documentElement.classList.toggle("dark", shouldUseDark);
-  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -194,13 +184,6 @@ export default function RoomClient({ code }: RoomClientProps) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [timeline.length]);
-
-  function toggleTheme() {
-    const next = !dark;
-    setDark(next);
-    localStorage.setItem("textbridge-theme", next ? "dark" : "light");
-    document.documentElement.classList.toggle("dark", next);
-  }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -334,7 +317,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   }
 
   return (
-    <main className="min-h-screen px-3 py-3 sm:px-5 lg:px-6">
+    <main className="min-h-screen px-3 py-3 font-mono sm:px-5 lg:px-6">
       <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[20rem_1fr]">
         <aside className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
           <div className="flex items-start justify-between gap-3">
@@ -342,13 +325,6 @@ export default function RoomClient({ code }: RoomClientProps) {
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Room Code</p>
               <h1 className="mt-1 text-3xl font-bold tracking-[0.2em] text-slate-950 dark:text-white">{code}</h1>
             </div>
-            <button
-              onClick={toggleTheme}
-              className="grid size-10 place-items-center rounded-lg border border-slate-200 text-slate-700 transition hover:border-bridge-500 dark:border-slate-800 dark:text-slate-200"
-              aria-label="Toggle dark mode"
-            >
-              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </button>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">

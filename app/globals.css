@@ -3,12 +3,6 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --background: #f8fafc;
-  --foreground: #0f172a;
-}
-
-.dark {
   color-scheme: dark;
   --background: #020617;
   --foreground: #e2e8f0;
@@ -31,6 +25,7 @@ body {
     radial-gradient(circle at bottom right, rgba(2, 132, 199, 0.10), transparent 34rem),
     var(--background);
   color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 button,
