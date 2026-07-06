@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
 import { cn, generateRoomCode } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const expiryOptions = [
   { label: "10 min", value: 10 },
@@ -104,25 +105,26 @@ export default function HomePage() {
   }
 
   return (
-    <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-white">
+    <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-th-text">
       <GridBackground size={32} />
 
       <div className="mx-auto flex w-full max-w-xl flex-col justify-center">
         <header className="mb-7 text-center">
+          <div className="flex justify-end"><ThemeToggle /></div>
           <TextBridgeMark />
-          <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">TextBridge</h1>
-          <p className="mt-2 text-sm text-slate-400">Send text and files between your devices instantly.</p>
+          <h1 className="mt-4 text-4xl font-bold tracking-tight text-th-text sm:text-5xl">TextBridge</h1>
+          <p className="mt-2 text-sm text-th-text-muted">Send text and files between your devices instantly.</p>
         </header>
 
-        <section className="rounded-xl border border-neutral-700/70 bg-neutral-950/55 p-5 shadow-soft backdrop-blur-md">
-          <div className="mb-5 rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-4 backdrop-blur-sm">
+        <section className="rounded-xl border border-th-border/70 bg-th-card/55 p-5 shadow-soft backdrop-blur-md">
+          <div className="mb-5 rounded-lg border border-th-border/70 bg-th-inner/30 p-4 backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-neutral-300">{selectedRoomCode ? "Ready room" : "Random room"}</p>
+                <p className="text-sm text-th-text-muted">{selectedRoomCode ? "Ready room" : "Random room"}</p>
                 <p
                   className={cn(
-                    "mt-1 flex h-8 items-center gap-1 text-2xl font-bold tracking-[0.24em] text-white",
-                    isRandomizing && "text-neutral-200",
+                    "mt-1 flex h-8 items-center gap-1 text-2xl font-bold tracking-[0.24em] text-th-text",
+                    isRandomizing && "text-th-text-sub",
                   )}
                 >
                   {(selectedRoomCode || "------").split("").map((character, index) => (
@@ -139,7 +141,7 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setIsGuideOpen(true)}
-                className="group relative grid size-12 place-items-center overflow-hidden rounded-lg border border-neutral-700 bg-black/70 text-white transition hover:animate-[guide-button-hover_720ms_ease-in-out_infinite] hover:border-emerald-300/70 hover:bg-neutral-900 active:scale-95 focus:outline-none focus:ring-4 focus:ring-neutral-500/20"
+                className="group relative grid size-12 place-items-center overflow-hidden rounded-lg border border-th-border bg-th-overlay/70 text-th-text transition hover:animate-[guide-button-hover_720ms_ease-in-out_infinite] hover:border-th-accent/70 hover:bg-th-elevated active:scale-95 focus:outline-none focus:ring-4 focus:ring-th-border-strong/20"
                 aria-label="Open usage guide"
               >
                 <span className="absolute inset-0 rounded-lg bg-emerald-300/0 transition group-hover:animate-[guide-button-glow_720ms_ease-in-out_infinite]" />
@@ -148,7 +150,7 @@ export default function HomePage() {
                 />
               </button>
             </div>
-            <div className="mt-4 flex items-center gap-2 text-sm text-emerald-200">
+            <div className="mt-4 flex items-center gap-2 text-sm text-th-accent-text">
               <Check className="size-4" />
               {selectedRoomCode ? "Room code ready" : "Randomize a room number first"}
             </div>
@@ -158,17 +160,17 @@ export default function HomePage() {
             type="button"
             onClick={randomizeRoomCode}
             disabled={isRandomizing || isCreating}
-            className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 px-4 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+            className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-th-border/70 bg-th-card/30 px-4 py-3 font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:cursor-not-allowed disabled:opacity-70"
           >
             <Shuffle className={cn("size-5", isRandomizing && "animate-spin")} />
             {isRandomizing ? "Randomizing..." : selectedRoomCode ? "Randomize Again" : "Randomize Room Number"}
           </button>
 
-          <div className="mb-3 grid gap-3 rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-4">
+          <div className="mb-3 grid gap-3 rounded-lg border border-th-border/70 bg-th-card/30 p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-white">Privacy controls</p>
-                <p className="mt-1 text-xs leading-5 text-neutral-400">Turn on a password when the room should stay private.</p>
+                <p className="text-sm font-semibold text-th-text">Privacy controls</p>
+                <p className="mt-1 text-xs leading-5 text-th-text-muted">Turn on a password when the room should stay private.</p>
               </div>
               <button
                 type="button"
@@ -180,8 +182,8 @@ export default function HomePage() {
                 className={cn(
                   "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold transition",
                   isPrivate
-                    ? "border-emerald-300/70 bg-emerald-400/15 text-emerald-100"
-                    : "border-neutral-700 bg-neutral-900/60 text-neutral-200",
+                    ? "border-th-accent/70 bg-th-accent-soft/15 text-th-accent-text"
+                    : "border-th-border bg-th-elevated/60 text-th-text-sub",
                 )}
               >
                 {isPrivate ? <Lock className="size-4" /> : <Unlock className="size-4" />}
@@ -195,12 +197,12 @@ export default function HomePage() {
                 onChange={(event) => setRoomPassword(event.target.value)}
                 type="password"
                 placeholder="Room password"
-                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-neutral-100 outline-none transition placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
+                className="w-full rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-th-text-sub outline-none transition placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
               />
             ) : null}
 
             <div>
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-th-text">
                 <Clock3 className="size-4" />
                 Auto-expire
               </div>
@@ -213,8 +215,8 @@ export default function HomePage() {
                     className={cn(
                       "rounded-lg border px-3 py-2 text-sm font-medium transition",
                       expiresInMinutes === option.value
-                        ? "border-emerald-300/70 bg-emerald-400/15 text-emerald-100"
-                        : "border-neutral-700 bg-neutral-900/40 text-neutral-300 hover:border-neutral-500 hover:text-white",
+                        ? "border-th-accent/70 bg-th-accent-soft/15 text-th-accent-text"
+                        : "border-th-border bg-th-elevated/40 text-th-text-muted hover:border-th-border-strong hover:text-th-text",
                     )}
                   >
                     {option.label}
@@ -227,20 +229,20 @@ export default function HomePage() {
           <button
             onClick={createRoom}
             disabled={isCreating || isRandomizing || !selectedRoomCode}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950/60 px-4 py-3 font-semibold text-white shadow-sm transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-70"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-4 py-3 font-semibold text-th-text shadow-sm transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <Plus className="size-5" />
             {isCreating ? "Creating..." : "Create Room"}
           </button>
 
-          <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500">
-            <span className="h-px flex-1 bg-neutral-800" />
+          <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-th-text-faint">
+            <span className="h-px flex-1 bg-th-border-subtle" />
             or join
-            <span className="h-px flex-1 bg-neutral-800" />
+            <span className="h-px flex-1 bg-th-border-subtle" />
           </div>
 
           <form onSubmit={joinRoom} className="space-y-3">
-            <label className="block text-sm font-medium text-slate-200" htmlFor="room-code">
+            <label className="block text-sm font-medium text-th-text-sub" htmlFor="room-code">
               Enter Room Code
             </label>
             <input
@@ -248,15 +250,15 @@ export default function HomePage() {
               value={roomCode}
               onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
               placeholder="A7K92P"
-              className="w-full rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-lg font-semibold uppercase tracking-[0.22em] text-white outline-none backdrop-blur-sm transition placeholder:tracking-normal placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
+              className="w-full rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-lg font-semibold uppercase tracking-[0.22em] text-th-text outline-none backdrop-blur-sm transition placeholder:tracking-normal placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
             />
-            <button className="flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 px-4 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white">
+            <button className="flex w-full items-center justify-center gap-2 rounded-lg border border-th-border/70 bg-th-card/30 px-4 py-3 font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text">
               Join Room
               <ArrowRight className="size-4" />
             </button>
           </form>
 
-          {error ? <p className="mt-4 rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</p> : null}
+          {error ? <p className="mt-4 rounded-lg bg-th-error-bg/40 px-3 py-2 text-sm text-th-error-text">{error}</p> : null}
         </section>
       </div>
 
@@ -269,39 +271,39 @@ export default function HomePage() {
 function CreatingRoomLoading({ code }: { code: string }) {
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-center bg-black/80 px-4 py-6 backdrop-blur-md"
+      className="fixed inset-0 z-[60] grid place-items-center bg-th-overlay/80 px-4 py-6 backdrop-blur-md"
       role="status"
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="w-full max-w-sm rounded-xl border border-neutral-700/70 bg-neutral-950/95 p-6 text-center shadow-2xl">
+      <div className="w-full max-w-sm rounded-xl border border-th-border/70 bg-th-card/95 p-6 text-center shadow-2xl">
         <div className="mx-auto flex h-24 w-56 items-center justify-center">
           <div className="relative flex w-full items-center justify-between">
-            <div className="grid size-14 place-items-center rounded-lg border border-neutral-600 bg-neutral-900">
-              <MonitorSmartphone className="size-7 text-neutral-100" />
+            <div className="grid size-14 place-items-center rounded-lg border border-th-border bg-th-elevated">
+              <MonitorSmartphone className="size-7 text-th-text-sub" />
             </div>
 
-            <div className="relative mx-3 h-1 flex-1 overflow-hidden rounded-full bg-neutral-800">
-              <span className="absolute inset-y-0 left-0 w-1/2 animate-[bridge-load_1.1s_ease-in-out_infinite] rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.85)]" />
+            <div className="relative mx-3 h-1 flex-1 overflow-hidden rounded-full bg-th-border-subtle">
+              <span className="absolute inset-y-0 left-0 w-1/2 animate-[bridge-load_1.1s_ease-in-out_infinite] rounded-full bg-th-accent shadow-[0_0_18px_rgba(52,211,153,0.85)]" />
             </div>
 
-            <div className="grid size-14 place-items-center rounded-lg border border-emerald-300/60 bg-neutral-900 shadow-[0_0_28px_rgba(52,211,153,0.16)]">
-              <TabletSmartphone className="size-7 text-emerald-200" />
+            <div className="grid size-14 place-items-center rounded-lg border border-th-accent/60 bg-th-elevated shadow-[0_0_28px_rgba(52,211,153,0.16)]">
+              <TabletSmartphone className="size-7 text-th-accent-text" />
             </div>
 
-            <span className="absolute left-[4.25rem] top-1/2 size-2 -translate-y-1/2 animate-ping rounded-full bg-emerald-300" />
-            <span className="absolute right-[4.25rem] top-1/2 size-2 -translate-y-1/2 animate-pulse rounded-full bg-emerald-200" />
+            <span className="absolute left-[4.25rem] top-1/2 size-2 -translate-y-1/2 animate-ping rounded-full bg-th-accent" />
+            <span className="absolute right-[4.25rem] top-1/2 size-2 -translate-y-1/2 animate-pulse rounded-full bg-th-accent" />
           </div>
         </div>
 
-        <h2 className="mt-2 text-xl font-bold text-white">Creating room</h2>
-        <p className="mt-2 text-sm leading-6 text-neutral-400">Preparing room {code} and getting your devices ready.</p>
+        <h2 className="mt-2 text-xl font-bold text-th-text">Creating room</h2>
+        <p className="mt-2 text-sm leading-6 text-th-text-muted">Preparing room {code} and getting your devices ready.</p>
 
         <div className="mt-5 flex justify-center gap-2">
           {[0, 1, 2].map((index) => (
             <span
               key={index}
-              className="size-2 animate-bounce rounded-full bg-emerald-300"
+              className="size-2 animate-bounce rounded-full bg-th-accent"
               style={{ animationDelay: `${index * 120}ms` }}
             />
           ))}
@@ -329,26 +331,26 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center bg-th-overlay/70 px-4 py-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="usage-guide-title"
     >
-      <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-neutral-700/70 bg-neutral-950/95 shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-5 py-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-th-border/70 bg-th-card/95 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-th-border-subtle px-5 py-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-200">
+            <div className="flex items-center gap-2 text-sm font-semibold text-th-accent-text">
               <TabletSmartphone className="size-4" />
               Works across devices
             </div>
-            <h2 id="usage-guide-title" className="mt-2 text-xl font-bold text-white">
+            <h2 id="usage-guide-title" className="mt-2 text-xl font-bold text-th-text">
               How TextBridge works
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="grid size-10 shrink-0 place-items-center rounded-lg border border-neutral-700/70 text-neutral-300 transition hover:border-neutral-500 hover:bg-neutral-900 hover:text-white"
+            className="grid size-10 shrink-0 place-items-center rounded-lg border border-th-border/70 text-th-text-muted transition hover:border-th-border-strong hover:bg-th-elevated hover:text-th-text"
             aria-label="Close usage guide"
           >
             <X className="size-5" />
@@ -357,19 +359,19 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
 
         <div className="grid gap-3 p-5 sm:grid-cols-3">
           {steps.map((step, index) => (
-            <div key={step.title} className="rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-4">
-              <div className="grid size-9 place-items-center rounded-lg bg-neutral-950/70 text-sm font-bold text-emerald-200">
+            <div key={step.title} className="rounded-lg border border-th-border/70 bg-th-inner/30 p-4">
+              <div className="grid size-9 place-items-center rounded-lg bg-th-card/70 text-sm font-bold text-th-accent-text">
                 {index + 1}
               </div>
-              <h3 className="mt-3 font-semibold text-white">{step.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-neutral-400">{step.body}</p>
+              <h3 className="mt-3 font-semibold text-th-text">{step.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-th-text-muted">{step.body}</p>
             </div>
           ))}
         </div>
 
-        <div className="border-t border-neutral-800 px-5 py-4">
-          <div className="flex items-start gap-3 rounded-lg bg-neutral-900/50 p-3 text-sm leading-6 text-neutral-300">
-            <MonitorSmartphone className="mt-0.5 size-5 shrink-0 text-emerald-200" />
+        <div className="border-t border-th-border-subtle px-5 py-4">
+          <div className="flex items-start gap-3 rounded-lg bg-th-elevated/50 p-3 text-sm leading-6 text-th-text-muted">
+            <MonitorSmartphone className="mt-0.5 size-5 shrink-0 text-th-accent-text" />
             <p>Great for sending notes or files between phone, computer, and tablet without needing an account.</p>
           </div>
         </div>

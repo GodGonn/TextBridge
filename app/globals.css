@@ -5,7 +5,51 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+  --th-page: 248 250 252;
+  --th-card: 255 255 255;
+  --th-inner: 241 245 249;
+  --th-elevated: 248 250 252;
+  --th-text: 15 23 42;
+  --th-text-sub: 51 65 85;
+  --th-text-muted: 100 116 139;
+  --th-text-faint: 148 163 184;
+  --th-border: 203 213 225;
+  --th-border-strong: 148 163 184;
+  --th-border-subtle: 226 232 240;
+  --th-accent: 5 150 105;
+  --th-accent-text: 4 120 87;
+  --th-accent-soft: 209 250 229;
+  --th-overlay: 0 0 0;
+  --th-error-bg: 254 226 226;
+  --th-error-text: 185 28 28;
+  --th-warning-bg: 254 243 199;
+  --th-warning-text: 146 64 14;
+  --th-grid-fill: rgba(148, 163, 184, 0.10);
+}
+
+.dark {
   color-scheme: dark;
+  --th-page: 10 10 10;
+  --th-card: 10 10 10;
+  --th-inner: 38 38 38;
+  --th-elevated: 23 23 23;
+  --th-text: 255 255 255;
+  --th-text-sub: 229 229 229;
+  --th-text-muted: 163 163 163;
+  --th-text-faint: 115 115 115;
+  --th-border: 64 64 64;
+  --th-border-strong: 115 115 115;
+  --th-border-subtle: 38 38 38;
+  --th-accent: 110 231 183;
+  --th-accent-text: 167 243 208;
+  --th-accent-soft: 52 211 153;
+  --th-overlay: 0 0 0;
+  --th-error-bg: 69 10 10;
+  --th-error-text: 254 202 202;
+  --th-warning-bg: 69 26 3;
+  --th-warning-text: 254 243 199;
+  --th-grid-fill: rgba(148, 163, 184, 0.14);
 }
 
 * {
@@ -14,13 +58,14 @@
 
 html {
   min-height: 100%;
-  background: var(--background);
+  background: rgb(var(--th-page));
 }
 
 body {
   min-height: 100vh;
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: rgb(var(--th-page));
 }
 
 button,
@@ -185,7 +230,6 @@ textarea {
     outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
   body {
-    background: var(--background);
     color: var(--foreground);
   }
 }

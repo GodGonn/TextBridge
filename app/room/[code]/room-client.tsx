@@ -26,7 +26,9 @@ import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { ImagesBadge } from "@/components/ui/images-badge";
+import { Terminal } from "@/components/ui/terminal";
 import type { BridgeFile, BridgeMessage, RoomView } from "@/lib/types";
 import { cn, formatFileSize, formatTime } from "@/lib/utils";
 
@@ -54,6 +56,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [notice, setNotice] = useState("");
   const [copiedId, setCopiedId] = useState("");
   const [isRoomLinkCopied, setIsRoomLinkCopied] = useState(false);
+  const [isQrOpen, setIsQrOpen] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [roomPassword, setRoomPassword] = useState("");
@@ -102,6 +105,31 @@ export default function RoomClient({ code }: RoomClientProps) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [timeline.length]);
+
+  useEffect(() => {
+    if (!room) return;
+
+    const handlePaste = (event: ClipboardEvent) => {
+      if (uploading) return;
+
+      const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith("image/"));
+      const pastedImage = imageItem?.getAsFile();
+
+      if (!pastedImage) return;
+
+      event.preventDefault();
+      const extension = pastedImage.type.split("/")[1] || "png";
+      const upload =
+        pastedImage.name && pastedImage.name.trim()
+          ? pastedImage
+          : new File([pastedImage], `clipboard-${Date.now()}.${extension}`, { type: pastedImage.type });
+
+      void uploadSelectedFile(upload);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [room, uploading]);
 
   function getRoomHeaders(password = roomPassword) {
     const headers: HeadersInit = {};
@@ -367,16 +395,16 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   if (status === "locked" && !room) {
     return (
-      <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-white">
+      <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-th-text">
         <GridBackground size={32} />
         <div className="mx-auto flex w-full max-w-md flex-col justify-center">
-          <div className="rounded-xl border border-neutral-700/70 bg-neutral-950/80 p-6 shadow-2xl backdrop-blur-md">
-            <div className="mx-auto grid size-14 place-items-center rounded-xl border border-neutral-700 bg-neutral-900 text-neutral-100">
+          <div className="rounded-xl border border-th-border/70 bg-th-card/80 p-6 shadow-2xl backdrop-blur-md">
+            <div className="mx-auto grid size-14 place-items-center rounded-xl border border-th-border bg-th-elevated text-th-text-sub">
               <Lock className="size-6" />
             </div>
-            <h1 className="mt-4 text-center text-2xl font-bold text-white">Private Room</h1>
-            <p className="mt-2 text-center text-sm leading-6 text-neutral-400">
-              Room <span className="font-semibold tracking-[0.2em] text-neutral-200">{code}</span> needs a password before it can load.
+            <h1 className="mt-4 text-center text-2xl font-bold text-th-text">Private Room</h1>
+            <p className="mt-2 text-center text-sm leading-6 text-th-text-muted">
+              Room <span className="font-semibold tracking-[0.2em] text-th-text-sub">{code}</span> needs a password before it can load.
             </p>
             <form onSubmit={unlockRoom} className="mt-5 space-y-3">
               <input
@@ -384,21 +412,21 @@ export default function RoomClient({ code }: RoomClientProps) {
                 onChange={(event) => setPasswordInput(event.target.value)}
                 type="password"
                 placeholder="Enter room password"
-                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-neutral-100 outline-none transition placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
+                className="w-full rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-th-text-sub outline-none transition placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
               />
               <button
                 type="submit"
                 disabled={isUnlocking || !passwordInput.trim()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950/60 px-4 py-3 font-semibold text-white transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-4 py-3 font-semibold text-th-text transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Unlock className="size-4" />
                 {isUnlocking ? "Unlocking..." : "Unlock Room"}
               </button>
             </form>
-            {notice ? <p className="mt-4 rounded-lg bg-amber-950/40 px-3 py-2 text-sm text-amber-100">{notice}</p> : null}
+            {notice ? <p className="mt-4 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-sm text-th-warning-text">{notice}</p> : null}
             <Link
               href="/"
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 px-4 py-3 text-sm font-semibold text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white"
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-th-border/70 bg-th-card/30 px-4 py-3 text-sm font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text"
             >
               <Home className="size-4" />
               Back Home
@@ -411,18 +439,18 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   if (status === "expired") {
     return (
-      <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-white">
+      <main className="relative isolate grid min-h-screen overflow-hidden px-4 py-6 font-mono text-th-text">
         <GridBackground size={32} />
         <div className="mx-auto flex w-full max-w-md flex-col justify-center">
-          <div className="rounded-xl border border-neutral-700/70 bg-neutral-950/80 p-6 text-center shadow-2xl backdrop-blur-md">
-            <div className="mx-auto grid size-14 place-items-center rounded-xl border border-neutral-700 bg-neutral-900 text-neutral-100">
+          <div className="rounded-xl border border-th-border/70 bg-th-card/80 p-6 text-center shadow-2xl backdrop-blur-md">
+            <div className="mx-auto grid size-14 place-items-center rounded-xl border border-th-border bg-th-elevated text-th-text-sub">
               <TimerReset className="size-6" />
             </div>
-            <h1 className="mt-4 text-2xl font-bold text-white">Room Expired</h1>
-            <p className="mt-2 text-sm leading-6 text-neutral-400">{notice || "This room is no longer available."}</p>
+            <h1 className="mt-4 text-2xl font-bold text-th-text">Room Expired</h1>
+            <p className="mt-2 text-sm leading-6 text-th-text-muted">{notice || "This room is no longer available."}</p>
             <Link
               href="/"
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950/60 px-4 py-3 font-semibold text-white transition hover:border-neutral-500 hover:bg-neutral-900/60"
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-4 py-3 font-semibold text-th-text transition hover:border-th-border-strong hover:bg-th-elevated/60"
             >
               <Home className="size-4" />
               Create a New Room
@@ -436,20 +464,23 @@ export default function RoomClient({ code }: RoomClientProps) {
   return (
     <main className="relative isolate min-h-screen overflow-hidden px-3 py-3 font-mono sm:px-5 lg:px-6">
       <GridBackground size={32} />
-      <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[20rem_1fr]">
-        <aside className="rounded-xl border border-neutral-700/70 bg-neutral-950/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
+      <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[24rem_minmax(0,1fr)]">
+        <aside className="rounded-xl border border-th-border/70 bg-th-card/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
           <div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-neutral-400">Room Code</p>
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 px-3 py-2 text-sm font-semibold text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white"
-              >
-                <Home className="size-4" />
-                Home
-              </Link>
+              <p className="text-sm font-medium text-th-text-muted">Room Code</p>
+              <div className="flex items-center gap-2">
+                <ThemeToggle />
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-2 rounded-lg border border-th-border/70 bg-th-card/30 px-3 py-2 text-sm font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text"
+                >
+                  <Home className="size-4" />
+                  Home
+                </Link>
+              </div>
             </div>
-            <h1 className="mt-1 text-3xl font-bold tracking-[0.2em] text-white">{code}</h1>
+            <h1 className="mt-1 text-3xl font-bold tracking-[0.2em] text-th-text">{code}</h1>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">
@@ -457,14 +488,28 @@ export default function RoomClient({ code }: RoomClientProps) {
             <Stat label="Files" value={files.filter((file) => !file.deleted_at).length} />
           </div>
 
-          <div className="mt-4 rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-3 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-neutral-100">
-              <QrCode className="size-4" />
-              Scan to join
-            </div>
-            <div className="mt-3 grid place-items-center rounded-lg bg-white p-3">
-              {roomUrl ? <QRCodeSVG value={roomUrl} size={172} /> : null}
-            </div>
+          <div className="mt-4 rounded-lg border border-th-border/70 bg-th-inner/30 p-3 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={() => setIsQrOpen((current) => !current)}
+              className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-th-text-sub"
+              aria-expanded={isQrOpen}
+              aria-controls="room-qr-panel"
+            >
+              <span className="flex items-center gap-2">
+                <QrCode className="size-4" />
+                Scan to join
+              </span>
+              <span className="flex items-center gap-2 text-xs text-th-text-muted">
+                {isQrOpen ? "Hide" : "Show"}
+                <ChevronDown className={cn("size-4 transition-transform duration-200", isQrOpen && "rotate-180")} />
+              </span>
+            </button>
+            {isQrOpen ? (
+              <div id="room-qr-panel" className="mt-3 grid place-items-center rounded-lg bg-white p-3">
+                {roomUrl ? <QRCodeSVG value={roomUrl} size={172} /> : null}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={copyRoomLink}
@@ -472,8 +517,8 @@ export default function RoomClient({ code }: RoomClientProps) {
               className={cn(
                 "mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60",
                 isRoomLinkCopied
-                  ? "animate-[copy-confirm_420ms_ease-out] border-emerald-300/70 bg-emerald-400/15 text-emerald-100 shadow-[0_0_22px_rgba(52,211,153,0.16)]"
-                  : "border-neutral-700 text-neutral-200 hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white",
+                  ? "animate-[copy-confirm_420ms_ease-out] border-th-accent/70 bg-th-accent-soft/15 text-th-accent-text shadow-[0_0_22px_rgba(52,211,153,0.16)]"
+                  : "border-th-border text-th-text-sub hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text",
               )}
               aria-live="polite"
             >
@@ -482,18 +527,47 @@ export default function RoomClient({ code }: RoomClientProps) {
             </button>
           </div>
 
-          <div className="mt-4 space-y-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-3 text-sm leading-6 text-neutral-300 backdrop-blur-sm">
+          <div className="mt-4 space-y-2 rounded-lg border border-th-border/70 bg-th-card/30 p-3 text-sm leading-6 text-th-text-muted backdrop-blur-sm">
             <div className="flex items-center gap-2">
-              <Lock className="size-4 text-neutral-400" />
+              <Lock className="size-4 text-th-text-muted" />
               <span>{room?.requires_password ? "Password protected" : "Open room"}</span>
             </div>
             <div className="flex items-center gap-2">
-              <TimerReset className="size-4 text-neutral-400" />
+              <TimerReset className="size-4 text-th-text-muted" />
               <span>{room?.expired_at ? `Expires ${formatTime(room.expired_at)}` : "No auto-expire"}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block size-2 rounded-full bg-emerald-300" />
+              <span className="inline-block size-2 rounded-full bg-th-accent" />
               <span>{status === "online" ? "Supabase live sync" : status === "local" ? "Local mode sync" : "Connecting..."}</span>
+            </div>
+          </div>
+
+          <div className="mt-4 hidden lg:block">
+            <div className="overflow-hidden rounded-xl border border-th-border/70 bg-th-card/30 shadow-sm backdrop-blur-md">
+              <Terminal
+                className="max-w-none min-w-0 px-0"
+                panelClassName="rounded-none border-0 shadow-none"
+                contentClassName="h-[20.5rem] overflow-x-hidden px-3 py-4"
+                username="TextBridge"
+                commands={[
+                  "tb room",
+                  "tb pair phone",
+                  "tb send note.txt",
+                  "tb paste otp.txt",
+                  "echo 'self-DM retired'",
+                ]}
+                outputs={{
+                  0: ["room ready."],
+                  1: ["phone linked."],
+                  2: ["sent: note.txt"],
+                  3: ["pasted: otp.txt"],
+                  4: ["self-DM retired."],
+                }}
+                typingSpeed={45}
+                delayBetweenCommands={1000}
+                initialDelay={250}
+                enableSound={false}
+              />
             </div>
           </div>
         </aside>
@@ -504,33 +578,33 @@ export default function RoomClient({ code }: RoomClientProps) {
           onDragLeave={handleDragLeave}
           onDrop={(event) => void handleDrop(event)}
           className={cn(
-            "relative flex min-h-[75vh] flex-col overflow-hidden rounded-xl border border-neutral-700/70 bg-neutral-950/55 shadow-sm backdrop-blur-md lg:h-[calc(100vh-1.5rem)]",
-            isDraggingFile && "border-emerald-300/70 bg-emerald-400/5 shadow-[0_0_0_1px_rgba(110,231,183,0.2)]",
+            "relative flex min-h-[75vh] flex-col overflow-hidden rounded-xl border border-th-border/70 bg-th-card/55 shadow-sm backdrop-blur-md lg:h-[calc(100vh-1.5rem)]",
+            isDraggingFile && "border-th-accent/70 bg-th-accent-soft/5 shadow-[0_0_0_1px_rgba(110,231,183,0.2)]",
           )}
         >
           {isDraggingFile ? (
-            <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/65 backdrop-blur-sm">
-              <div className="rounded-2xl border border-emerald-300/60 bg-neutral-950/90 px-8 py-6 text-center shadow-2xl">
-                <div className="mx-auto grid size-14 place-items-center rounded-xl border border-emerald-300/40 bg-emerald-400/10 text-emerald-200">
+            <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-th-overlay/65 backdrop-blur-sm">
+              <div className="rounded-2xl border border-th-accent/60 bg-th-card/90 px-8 py-6 text-center shadow-2xl">
+                <div className="mx-auto grid size-14 place-items-center rounded-xl border border-th-accent/40 bg-th-accent-soft/10 text-th-accent-text">
                   <FileUp className="size-6" />
                 </div>
-                <p className="mt-4 text-lg font-semibold text-white">Drop file to upload</p>
-                <p className="mt-1 text-sm text-neutral-300">Images, PDFs, notes, and other files will be added to this room.</p>
+                <p className="mt-4 text-lg font-semibold text-th-text">Drop file to upload</p>
+                <p className="mt-1 text-sm text-th-text-muted">Images, PDFs, notes, and other files will be added to this room.</p>
               </div>
             </div>
           ) : null}
-          <div className="border-b border-neutral-800/80 p-3 sm:p-4">
+          <div className="border-b border-th-border-subtle/80 p-3 sm:p-4">
             <form onSubmit={sendMessage} className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder="Paste text, link, code, email, phone number..."
-                className="min-h-24 resize-none rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-neutral-100 outline-none backdrop-blur-sm transition placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
+                className="min-h-24 resize-none rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-th-text-sub outline-none backdrop-blur-sm transition placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
               />
               <div className="grid grid-cols-2 gap-2 sm:w-14 sm:grid-cols-1">
                 <button
                   disabled={!text.trim() || !room}
-                  className="grid h-12 place-items-center rounded-lg border border-neutral-700 bg-neutral-950/60 text-white transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
+                  className="grid h-12 place-items-center rounded-lg border border-th-border bg-th-card/60 text-th-text transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Send message"
                 >
                   <Send className="size-5" />
@@ -539,7 +613,7 @@ export default function RoomClient({ code }: RoomClientProps) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!room || uploading}
-                  className="grid h-12 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/30 text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
+                  className="grid h-12 place-items-center rounded-lg border border-th-border/70 bg-th-card/30 text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Upload file"
                 >
                   {uploading ? (
@@ -551,22 +625,22 @@ export default function RoomClient({ code }: RoomClientProps) {
               </div>
               <input ref={fileInputRef} onChange={uploadFile} type="file" className="hidden" />
             </form>
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-th-text-muted">
               <span>Supports images, PDF, TXT, DOCX, ZIP, and most common file types.</span>
-              <span className="text-emerald-200/90">Tip: drag and drop a file anywhere in this panel.</span>
+              <span className="text-th-accent-text/90">Tip: drag a file here or paste an image with Ctrl+V.</span>
             </div>
-            {notice ? <p className="mt-3 rounded-lg bg-amber-950/40 px-3 py-2 text-sm text-amber-100">{notice}</p> : null}
+            {notice ? <p className="mt-3 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-sm text-th-warning-text">{notice}</p> : null}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-4">
             {timeline.length === 0 ? (
-              <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-neutral-700/70 bg-neutral-950/25 text-center backdrop-blur-sm">
+              <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-th-border/70 bg-th-card/25 text-center backdrop-blur-sm">
                 <div className="max-w-sm px-6">
-                  <div className="mx-auto grid size-12 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/60 text-neutral-100 shadow-sm">
+                  <div className="mx-auto grid size-12 place-items-center rounded-lg border border-th-border/70 bg-th-card/60 text-th-text-sub shadow-sm">
                     <FileText className="size-6" />
                   </div>
-                  <p className="mt-4 font-semibold text-neutral-100">Nothing has been shared in this room yet.</p>
-                  <p className="mt-1 text-sm leading-6 text-neutral-400">Drop in a note, link, code snippet, or file to start the bridge.</p>
+                  <p className="mt-4 font-semibold text-th-text-sub">Nothing has been shared in this room yet.</p>
+                  <p className="mt-1 text-sm leading-6 text-th-text-muted">Drop in a note, link, code snippet, or file to start the bridge.</p>
                 </div>
               </div>
             ) : (
@@ -582,7 +656,12 @@ export default function RoomClient({ code }: RoomClientProps) {
                       onDelete={() => deleteMessage(entry.item.id)}
                     />
                   ) : (
-                    <FileCard key={`file-${entry.item.id}`} file={entry.item} onDelete={() => deleteFile(entry.item.id)} />
+                    <FileCard
+                      key={`file-${entry.item.id}`}
+                      file={entry.item}
+                      onDelete={() => deleteFile(entry.item.id)}
+                      onNotice={setNotice}
+                    />
                   ),
                 )}
                 <div ref={endRef} />
@@ -597,9 +676,9 @@ export default function RoomClient({ code }: RoomClientProps) {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-3 backdrop-blur-sm">
-      <p className="text-xs text-neutral-400">{label}</p>
-      <p className="mt-1 text-xl font-bold text-white">{value}</p>
+    <div className="rounded-lg border border-th-border/70 bg-th-card/30 p-3 backdrop-blur-sm">
+      <p className="text-xs text-th-text-muted">{label}</p>
+      <p className="mt-1 text-xl font-bold text-th-text">{value}</p>
     </div>
   );
 }
@@ -621,14 +700,14 @@ function MessageCard({
     <article
       className={cn(
         "rounded-lg border p-3 shadow-sm transition",
-        message.is_pinned ? "border-neutral-500 bg-neutral-800/40" : "border-neutral-700/70 bg-neutral-800/30",
+        message.is_pinned ? "border-th-border-strong bg-th-inner/40" : "border-th-border/70 bg-th-inner/30",
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-neutral-400">
-          <span className="rounded-full bg-neutral-950/70 px-2 py-1 font-medium uppercase text-neutral-300">{message.type}</span>
+        <div className="flex items-center gap-2 text-xs text-th-text-muted">
+          <span className="rounded-full bg-th-card/70 px-2 py-1 font-medium uppercase text-th-text-muted">{message.type}</span>
           <span>{formatTime(message.created_at)}</span>
-          {message.is_pinned ? <span className="font-medium text-neutral-100">Pinned</span> : null}
+          {message.is_pinned ? <span className="font-medium text-th-text-sub">Pinned</span> : null}
         </div>
         <div className="flex items-center gap-1">
           <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy} tone={copied ? "success" : "info"}>
@@ -642,7 +721,7 @@ function MessageCard({
           </IconButton>
         </div>
       </div>
-      <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-neutral-100">
+      <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-th-text-sub">
         {message.text}
       </pre>
       <MessagePreview message={message} />
@@ -650,35 +729,72 @@ function MessageCard({
   );
 }
 
-function FileCard({ file, onDelete }: { file: BridgeFile; onDelete: () => void }) {
+function FileCard({
+  file,
+  onDelete,
+  onNotice,
+}: {
+  file: BridgeFile;
+  onDelete: () => void;
+  onNotice: (message: string) => void;
+}) {
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  async function downloadFile() {
+    if (isDownloading) return;
+
+    setIsDownloading(true);
+    onNotice("");
+
+    try {
+      const response = await fetch(file.file_url);
+      if (!response.ok) {
+        throw new Error("Download failed.");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = file.file_name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (caught) {
+      onNotice(caught instanceof Error ? caught.message : "Download failed.");
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   return (
-    <article className="rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-3 shadow-sm transition backdrop-blur-sm">
+    <article className="rounded-lg border border-th-border/70 bg-th-inner/30 p-3 shadow-sm transition backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/60 text-neutral-100">
+          <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-th-border/70 bg-th-card/60 text-th-text-sub">
             {isImageFile(file) ? <ImageIcon className="size-5" /> : <FileText className="size-5" />}
           </div>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-              <span className="rounded-full bg-neutral-950/70 px-2 py-1 font-medium uppercase text-neutral-300">file</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-th-text-muted">
+              <span className="rounded-full bg-th-card/70 px-2 py-1 font-medium uppercase text-th-text-muted">file</span>
               <span>{formatTime(file.created_at)}</span>
               <span>{formatFileSize(file.file_size)}</span>
             </div>
-            <p className="mt-2 break-words text-sm font-semibold text-neutral-100">{file.file_name}</p>
-            <p className="mt-1 break-words text-xs text-neutral-400">{file.file_type || "application/octet-stream"}</p>
+            <p className="mt-2 break-words text-sm font-semibold text-th-text-sub">{file.file_name}</p>
+            <p className="mt-1 break-words text-xs text-th-text-muted">{file.file_type || "application/octet-stream"}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <a
-            href={file.file_url}
-            download={file.file_name}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 transition hover:border-emerald-300/40 hover:bg-emerald-400/18 hover:text-white"
+          <button
+            type="button"
+            onClick={() => void downloadFile()}
+            disabled={isDownloading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-th-accent/20 bg-th-accent-soft/10 px-2.5 py-1.5 text-xs font-semibold text-th-accent-text transition hover:border-th-accent/40 hover:bg-th-accent-soft/18 hover:text-th-text"
           >
             <Download className="size-4" />
-            <span className="hidden sm:inline">Download</span>
-          </a>
+            <span className="hidden sm:inline">{isDownloading ? "Downloading..." : "Download"}</span>
+          </button>
           <IconButton label="Delete" onClick={onDelete} tone="danger">
             <Trash2 className="size-4" />
           </IconButton>
@@ -706,14 +822,14 @@ function IconButton({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
         tone === "danger"
-          ? "border-red-400/20 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/18 hover:text-white"
+          ? "border-red-400/20 bg-red-500/10 text-th-error-text hover:border-red-400/40 hover:bg-red-500/18 hover:text-th-text"
           : tone === "info"
-            ? "border-sky-400/20 bg-sky-500/10 text-sky-100 hover:border-sky-400/40 hover:bg-sky-500/18 hover:text-white"
+            ? "border-sky-400/20 bg-sky-500/10 text-sky-100 hover:border-sky-400/40 hover:bg-sky-500/18 hover:text-th-text"
             : tone === "success"
-              ? "border-emerald-300/25 bg-emerald-400/12 text-emerald-100 hover:border-emerald-300/45 hover:bg-emerald-400/20 hover:text-white"
+              ? "border-th-accent/25 bg-th-accent-soft/12 text-th-accent-text hover:border-th-accent/45 hover:bg-th-accent-soft/20 hover:text-th-text"
               : tone === "accent"
-                ? "border-amber-300/25 bg-amber-400/12 text-amber-100 hover:border-amber-300/45 hover:bg-amber-400/20 hover:text-white"
-          : "border-neutral-700/80 bg-neutral-950/55 text-neutral-300 hover:border-neutral-500 hover:bg-neutral-900/80 hover:text-white",
+                ? "border-amber-300/25 bg-amber-400/12 text-th-warning-text hover:border-amber-300/45 hover:bg-amber-400/20 hover:text-th-text"
+          : "border-th-border/80 bg-th-card/55 text-th-text-muted hover:border-th-border-strong hover:bg-th-elevated/80 hover:text-th-text",
       )}
       type="button"
     >
@@ -730,13 +846,13 @@ function MessagePreview({ message }: { message: BridgeMessage }) {
 
   if (message.type === "email") {
     return (
-      <div className="mt-3 flex items-center gap-3 rounded-lg border border-neutral-700/70 bg-neutral-950/40 p-3">
-        <div className="grid size-10 place-items-center rounded-lg border border-neutral-700 bg-neutral-900 text-neutral-100">
+      <div className="mt-3 flex items-center gap-3 rounded-lg border border-th-border/70 bg-th-card/40 p-3">
+        <div className="grid size-10 place-items-center rounded-lg border border-th-border bg-th-elevated text-th-text-sub">
           <UserRound className="size-4" />
         </div>
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">email</p>
-          <a href={`mailto:${message.text}`} className="text-sm font-semibold text-emerald-200 hover:text-emerald-100">
+          <p className="text-xs uppercase tracking-wide text-th-text-faint">email</p>
+          <a href={`mailto:${message.text}`} className="text-sm font-semibold text-th-accent-text hover:text-th-accent-text">
             {message.text}
           </a>
         </div>
@@ -747,13 +863,13 @@ function MessagePreview({ message }: { message: BridgeMessage }) {
   if (message.type === "phone") {
     const telValue = message.text.replace(/[^\d+]/g, "");
     return (
-      <div className="mt-3 flex items-center gap-3 rounded-lg border border-neutral-700/70 bg-neutral-950/40 p-3">
-        <div className="grid size-10 place-items-center rounded-lg border border-neutral-700 bg-neutral-900 text-neutral-100">
+      <div className="mt-3 flex items-center gap-3 rounded-lg border border-th-border/70 bg-th-card/40 p-3">
+        <div className="grid size-10 place-items-center rounded-lg border border-th-border bg-th-elevated text-th-text-sub">
           <Phone className="size-4" />
         </div>
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">phone</p>
-          <a href={`tel:${telValue}`} className="text-sm font-semibold text-emerald-200 hover:text-emerald-100">
+          <p className="text-xs uppercase tracking-wide text-th-text-faint">phone</p>
+          <a href={`tel:${telValue}`} className="text-sm font-semibold text-th-accent-text hover:text-th-accent-text">
             Call {message.text}
           </a>
         </div>
@@ -777,16 +893,16 @@ function LinkPreviewCard({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="mt-3 block rounded-lg border border-neutral-700/70 bg-neutral-950/40 p-3 transition hover:border-neutral-500 hover:bg-neutral-900/60"
+      className="mt-3 block rounded-lg border border-th-border/70 bg-th-card/40 p-3 transition hover:border-th-border-strong hover:bg-th-elevated/60"
     >
       <div className="flex items-start gap-3">
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-neutral-700 bg-neutral-900 text-neutral-100">
+        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-th-border bg-th-elevated text-th-text-sub">
           <ExternalLink className="size-4" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-white">{domain}</p>
-          <p className="mt-1 break-words text-sm text-neutral-300">{decodeUrlPath(title)}</p>
-          <p className="mt-2 text-xs uppercase tracking-wide text-neutral-500">{summary}</p>
+          <p className="truncate text-sm font-semibold text-th-text">{domain}</p>
+          <p className="mt-1 break-words text-sm text-th-text-muted">{decodeUrlPath(title)}</p>
+          <p className="mt-2 text-xs uppercase tracking-wide text-th-text-faint">{summary}</p>
         </div>
       </div>
     </a>
@@ -825,8 +941,8 @@ function FilePreview({ file }: { file: BridgeFile }) {
 
   if (isImageFile(file)) {
     return (
-      <div className="mt-3 overflow-hidden rounded-lg border border-neutral-700/70 bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.12),_transparent_42%),linear-gradient(180deg,rgba(10,10,10,0.92),rgba(23,23,23,0.96))] p-2">
-        <div className="flex max-h-[32rem] min-h-44 items-center justify-center overflow-hidden rounded-md bg-black/35">
+      <div className="mt-3 overflow-hidden rounded-lg border border-th-border/70 bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.12),_transparent_42%),linear-gradient(180deg,rgba(10,10,10,0.92),rgba(23,23,23,0.96))] p-2">
+        <div className="flex max-h-[32rem] min-h-44 items-center justify-center overflow-hidden rounded-md bg-th-overlay/35">
           <img
             src={file.file_url}
             alt={file.file_name}
@@ -839,12 +955,12 @@ function FilePreview({ file }: { file: BridgeFile }) {
 
   if (isPdfFile(file)) {
     return (
-      <details className="mt-3 rounded-lg border border-neutral-700/70 bg-neutral-950/30">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-medium text-neutral-200">
+      <details className="mt-3 rounded-lg border border-th-border/70 bg-th-card/30">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-medium text-th-text-sub">
           <span>Preview PDF</span>
-          <ChevronDown className="size-4 text-neutral-400" />
+          <ChevronDown className="size-4 text-th-text-muted" />
         </summary>
-        <div className="border-t border-neutral-800 p-2">
+        <div className="border-t border-th-border-subtle p-2">
           <iframe src={file.file_url} title={file.file_name} className="h-96 w-full rounded-md bg-white" />
         </div>
       </details>
@@ -857,17 +973,17 @@ function FilePreview({ file }: { file: BridgeFile }) {
         <button
           type="button"
           onClick={() => void openTextPreview()}
-          className="inline-flex items-center gap-2 rounded-md border border-neutral-700 bg-neutral-950/50 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/60 hover:text-white"
+          className="inline-flex items-center gap-2 rounded-md border border-th-border bg-th-card/50 px-3 py-2 text-xs font-medium text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/60 hover:text-th-text"
         >
           <ChevronDown className={cn("size-4 transition", open && "rotate-180")} />
           {open ? "Hide preview" : "Preview text"}
         </button>
         {open ? (
-          <div className="mt-3 rounded-lg border border-neutral-700/70 bg-neutral-950/40 p-3">
-            {loading ? <p className="text-sm text-neutral-400">Loading preview...</p> : null}
-            {previewError ? <p className="text-sm text-amber-200">{previewError}</p> : null}
+          <div className="mt-3 rounded-lg border border-th-border/70 bg-th-card/40 p-3">
+            {loading ? <p className="text-sm text-th-text-muted">Loading preview...</p> : null}
+            {previewError ? <p className="text-sm text-th-warning-text">{previewError}</p> : null}
             {textPreview ? (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-neutral-200">
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-th-text-sub">
                 {textPreview}
               </pre>
             ) : null}

@@ -2,12 +2,10 @@ import { cn } from "@/lib/utils";
 
 type GridBackgroundProps = React.ComponentProps<"div"> & {
   size?: number;
-  fill?: string;
 };
 
 export function GridBackground({
   size = 32,
-  fill = "rgba(148, 163, 184, 0.14)",
   className,
   style,
   ...props
@@ -20,7 +18,7 @@ export function GridBackground({
         className,
       )}
       style={{
-        backgroundImage: `linear-gradient(to right, ${fill} 1px, transparent 1px), linear-gradient(to bottom, ${fill} 1px, transparent 1px)`,
+        backgroundImage: `linear-gradient(to right, var(--th-grid-fill) 1px, transparent 1px), linear-gradient(to bottom, var(--th-grid-fill) 1px, transparent 1px)`,
         backgroundSize: `${size}px ${size}px`,
         ...style,
       }}
