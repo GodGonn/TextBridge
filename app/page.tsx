@@ -1,11 +1,29 @@
 "use client";
 
-import { ArrowRight, BookOpen, Check, MonitorSmartphone, Plus, Shuffle, TabletSmartphone, X } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Check,
+  Clock3,
+  Lock,
+  MonitorSmartphone,
+  Plus,
+  Shuffle,
+  TabletSmartphone,
+  Unlock,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { cn, generateRoomCode } from "@/lib/utils";
+
+const expiryOptions = [
+  { label: "10 min", value: 10 },
+  { label: "1 hour", value: 60 },
+  { label: "24 hours", value: 1440 },
+  { label: "Never", value: 0 },
+];
 
 export default function HomePage() {
   const router = useRouter();
@@ -14,16 +32,48 @@ export default function HomePage() {
   const [isRandomizing, setIsRandomizing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [roomPassword, setRoomPassword] = useState("");
+  const [expiresInMinutes, setExpiresInMinutes] = useState(60);
   const [error, setError] = useState("");
 
-  async function createLocalRoom(code: string) {
+  async function createRoom() {
+    if (!selectedRoomCode || isRandomizing) {
+      setError("Randomize a room code before creating a room.");
+      return;
+    }
+
+    if (isPrivate && roomPassword.trim().length < 4) {
+      setError("Private rooms need a password with at least 4 characters.");
+      return;
+    }
+
+    setIsCreating(true);
+    setError("");
+
     const response = await fetch("/api/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({
+        code: selectedRoomCode,
+        isPrivate,
+        password: isPrivate ? roomPassword.trim() : null,
+        expiresInMinutes,
+      }),
     });
-    if (!response.ok) throw new Error("Create room failed");
-    return (await response.json()) as { code: string };
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error ?? "Could not create room.");
+      setIsCreating(false);
+      return;
+    }
+
+    const room = (await response.json()) as { code: string };
+    if (isPrivate && roomPassword.trim()) {
+      window.sessionStorage.setItem(`textbridge-room-password:${room.code}`, roomPassword.trim());
+    }
+    router.push(`/room/${room.code}`);
   }
 
   function randomizeRoomCode() {
@@ -43,47 +93,11 @@ export default function HomePage() {
     }, 55);
   }
 
-  async function createRoom() {
-    if (!selectedRoomCode || isRandomizing) {
-      setError("สุ่มหมายเลขห้องก่อนสร้างห้อง");
-      return;
-    }
-
-    setIsCreating(true);
-    setError("");
-    const code = selectedRoomCode;
-    const loadingDelay = new Promise<void>((resolve) => window.setTimeout(resolve, 900));
-
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { error: insertError } = await supabase.from("rooms").insert({ code });
-        if (!insertError) {
-          await loadingDelay;
-          router.push(`/room/${code}`);
-          return;
-        }
-      }
-
-      const room = await createLocalRoom(code);
-      await loadingDelay;
-      router.push(`/room/${room.code}`);
-    } catch {
-      try {
-        const room = await createLocalRoom(code);
-        await loadingDelay;
-        router.push(`/room/${room.code}`);
-      } catch {
-        setError("สร้างห้องไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-        setIsCreating(false);
-      }
-    }
-  }
-
   function joinRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const code = roomCode.trim().toUpperCase();
     if (!/^[A-Z0-9]{4,12}$/.test(code)) {
-      setError("กรุณากรอก Room Code ให้ถูกต้อง");
+      setError("Please enter a valid room code.");
       return;
     }
     router.push(`/room/${code}`);
@@ -136,7 +150,7 @@ export default function HomePage() {
             </div>
             <div className="mt-4 flex items-center gap-2 text-sm text-emerald-200">
               <Check className="size-4" />
-              {selectedRoomCode ? "Room number ready" : "Randomize a room number first"}
+              {selectedRoomCode ? "Room code ready" : "Randomize a room number first"}
             </div>
           </div>
 
@@ -150,12 +164,70 @@ export default function HomePage() {
             {isRandomizing ? "Randomizing..." : selectedRoomCode ? "Randomize Again" : "Randomize Room Number"}
           </button>
 
+          <div className="mb-3 grid gap-3 rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Privacy controls</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-400">Turn on a password when the room should stay private.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !isPrivate;
+                  setIsPrivate(next);
+                  if (!next) setRoomPassword("");
+                }}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold transition",
+                  isPrivate
+                    ? "border-emerald-300/70 bg-emerald-400/15 text-emerald-100"
+                    : "border-neutral-700 bg-neutral-900/60 text-neutral-200",
+                )}
+              >
+                {isPrivate ? <Lock className="size-4" /> : <Unlock className="size-4" />}
+                {isPrivate ? "Private" : "Open"}
+              </button>
+            </div>
+
+            {isPrivate ? (
+              <input
+                value={roomPassword}
+                onChange={(event) => setRoomPassword(event.target.value)}
+                type="password"
+                placeholder="Room password"
+                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-neutral-100 outline-none transition placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
+              />
+            ) : null}
+
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
+                <Clock3 className="size-4" />
+                Auto-expire
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {expiryOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => setExpiresInMinutes(option.value)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-sm font-medium transition",
+                      expiresInMinutes === option.value
+                        ? "border-emerald-300/70 bg-emerald-400/15 text-emerald-100"
+                        : "border-neutral-700 bg-neutral-900/40 text-neutral-300 hover:border-neutral-500 hover:text-white",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={createRoom}
             disabled={isCreating || isRandomizing || !selectedRoomCode}
-            className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950/60 px-4 py-3 font-semibold text-white shadow-sm transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-70",
-            )}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950/60 px-4 py-3 font-semibold text-white shadow-sm transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <Plus className="size-5" />
             {isCreating ? "Creating..." : "Create Room"}
@@ -222,8 +294,8 @@ function CreatingRoomLoading({ code }: { code: string }) {
           </div>
         </div>
 
-        <h2 className="mt-2 text-xl font-bold text-white">กำลังสร้างห้อง</h2>
-        <p className="mt-2 text-sm leading-6 text-neutral-400">เตรียมห้อง {code} และเชื่อมอุปกรณ์ของคุณ</p>
+        <h2 className="mt-2 text-xl font-bold text-white">Creating room</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-400">Preparing room {code} and getting your devices ready.</p>
 
         <div className="mt-5 flex justify-center gap-2">
           {[0, 1, 2].map((index) => (
@@ -242,16 +314,16 @@ function CreatingRoomLoading({ code }: { code: string }) {
 function UsageGuide({ onClose }: { onClose: () => void }) {
   const steps = [
     {
-      title: "สร้างห้อง",
-      body: "กด Randomize Room Number เพื่อสุ่มรหัสห้อง แล้วกด Create Room เพื่อเข้าใช้งาน",
+      title: "Create a room",
+      body: "Randomize a code, choose privacy and auto-expire, then create the room.",
     },
     {
-      title: "เปิดอีกเครื่อง",
-      body: "ใช้มือถือ คอม หรือ iPad เปิดเว็บเดียวกัน จากนั้นกรอกรหัสห้องหรือสแกน QR ในหน้าห้อง",
+      title: "Open another device",
+      body: "Use the same website on your phone, tablet, or laptop, then enter the room code or scan the QR code.",
     },
     {
-      title: "ส่งข้อความและไฟล์",
-      body: "วางข้อความ ลิงก์ โค้ด หรืออัปโหลดไฟล์ ทุกอุปกรณ์ในห้องเดียวกันจะเห็น timeline เดียวกัน",
+      title: "Share instantly",
+      body: "Send text, links, code, or files and every device in the room will see the same timeline.",
     },
   ];
 
@@ -267,10 +339,10 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-emerald-200">
               <TabletSmartphone className="size-4" />
-              ใช้ได้ทุกอุปกรณ์
+              Works across devices
             </div>
             <h2 id="usage-guide-title" className="mt-2 text-xl font-bold text-white">
-              วิธีใช้ TextBridge
+              How TextBridge works
             </h2>
           </div>
           <button
@@ -298,7 +370,7 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
         <div className="border-t border-neutral-800 px-5 py-4">
           <div className="flex items-start gap-3 rounded-lg bg-neutral-900/50 p-3 text-sm leading-6 text-neutral-300">
             <MonitorSmartphone className="mt-0.5 size-5 shrink-0 text-emerald-200" />
-            <p>เหมาะสำหรับส่งข้อความหรือไฟล์ระหว่างมือถือ คอมพิวเตอร์ และ iPad โดยไม่ต้องล็อกอิน</p>
+            <p>Great for sending notes or files between phone, computer, and tablet without needing an account.</p>
           </div>
         </div>
       </div>

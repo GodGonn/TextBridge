@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
-import { localStore } from "@/lib/local-store";
+import { getRoomView } from "@/lib/server-rooms";
 
 type RouteContext = {
   params: Promise<{ code: string }>;
 };
 
-export async function GET(_request: Request, { params }: RouteContext) {
+export async function GET(request: Request, { params }: RouteContext) {
   const { code } = await params;
-  const room = localStore.rooms.get(code.toUpperCase());
+  const password = request.headers.get("x-room-password");
+  const result = await getRoomView(code, password);
 
-  if (!room) {
-    return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.error, requiresPassword: result.requiresPassword ?? false },
+      { status: result.status },
+    );
   }
 
-  return NextResponse.json(room);
+  return NextResponse.json(result.room);
 }
-

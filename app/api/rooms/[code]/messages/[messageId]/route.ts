@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { localStore } from "@/lib/local-store";
 import type { BridgeMessage } from "@/lib/types";
+import { updateRoomMessage } from "@/lib/server-rooms";
 
 type RouteContext = {
   params: Promise<{ code: string; messageId: string }>;
@@ -8,25 +8,13 @@ type RouteContext = {
 
 export async function PATCH(request: Request, { params }: RouteContext) {
   const { code, messageId } = await params;
-  const room = localStore.rooms.get(code.toUpperCase());
-
-  if (!room) {
-    return NextResponse.json({ error: "Room not found" }, { status: 404 });
-  }
-
+  const password = request.headers.get("x-room-password");
   const patch = (await request.json()) as Partial<BridgeMessage>;
-  const messages = localStore.messages.get(room.id) ?? [];
-  const nextMessages = messages.map((message) =>
-    message.id === messageId ? { ...message, ...patch } : message,
-  );
-  const updated = nextMessages.find((message) => message.id === messageId);
+  const result = await updateRoomMessage(code, messageId, password, patch);
 
-  if (!updated) {
-    return NextResponse.json({ error: "Message not found" }, { status: 404 });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  localStore.messages.set(room.id, nextMessages);
-
-  return NextResponse.json(updated);
+  return NextResponse.json(result.item);
 }
-

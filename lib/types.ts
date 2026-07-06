@@ -20,6 +20,11 @@ export type Room = {
   is_private: boolean;
 };
 
+export type RoomView = Omit<Room, "password"> & {
+  requires_password: boolean;
+  storage_mode: "supabase" | "local";
+};
+
 export type BridgeFile = {
   id: string;
   room_id: string;

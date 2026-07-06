@@ -1,53 +1,31 @@
 import { NextResponse } from "next/server";
-import { localStore } from "@/lib/local-store";
-import type { BridgeMessage } from "@/lib/types";
-import { detectMessageType } from "@/lib/utils";
+import { createRoomMessage, getRoomMessages } from "@/lib/server-rooms";
 
 type RouteContext = {
   params: Promise<{ code: string }>;
 };
 
-export async function GET(_request: Request, { params }: RouteContext) {
+export async function GET(request: Request, { params }: RouteContext) {
   const { code } = await params;
-  const room = localStore.rooms.get(code.toUpperCase());
+  const password = request.headers.get("x-room-password");
+  const result = await getRoomMessages(code, password);
 
-  if (!room) {
-    return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json(localStore.messages.get(room.id) ?? []);
+  return NextResponse.json(result.items);
 }
 
 export async function POST(request: Request, { params }: RouteContext) {
   const { code } = await params;
-  const room = localStore.rooms.get(code.toUpperCase());
-
-  if (!room) {
-    return NextResponse.json({ error: "Room not found" }, { status: 404 });
-  }
-
+  const password = request.headers.get("x-room-password");
   const body = (await request.json()) as { text?: string };
-  const text = body.text?.trim();
+  const result = await createRoomMessage(code, password, body.text ?? "");
 
-  if (!text) {
-    return NextResponse.json({ error: "Text is required" }, { status: 400 });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const message: BridgeMessage = {
-    id: crypto.randomUUID(),
-    room_id: room.id,
-    text,
-    type: detectMessageType(text),
-    is_pinned: false,
-    created_at: new Date().toISOString(),
-    expired_at: null,
-    deleted_at: null,
-  };
-
-  const messages = localStore.messages.get(room.id) ?? [];
-  messages.push(message);
-  localStore.messages.set(room.id, messages);
-
-  return NextResponse.json(message);
+  return NextResponse.json(result.item);
 }
-
