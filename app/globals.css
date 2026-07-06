@@ -47,6 +47,16 @@ textarea {
   animation: card-float 1.8s ease-in-out infinite;
 }
 
+@keyframes bridge-load {
+  0% {
+    transform: translateX(-115%);
+  }
+  55%,
+  100% {
+    transform: translateX(230%);
+  }
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-sans);

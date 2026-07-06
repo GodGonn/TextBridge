@@ -51,10 +51,10 @@ create table if not exists public.room_members (
 );
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('textbridge-files', 'textbridge-files', true, 52428800, null)
+values ('textbridge-files', 'textbridge-files', true, 104857600, null)
 on conflict (id) do update
 set public = true,
-    file_size_limit = 52428800,
+    file_size_limit = 104857600,
     allowed_mime_types = null;
 
 alter table public.rooms enable row level security;
