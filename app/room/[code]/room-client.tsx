@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Check,
   Copy,
   Download,
   FileText,
@@ -48,6 +49,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [status, setStatus] = useState<Status>("connecting");
   const [notice, setNotice] = useState("");
   const [copiedId, setCopiedId] = useState("");
+  const [isRoomLinkCopied, setIsRoomLinkCopied] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -278,6 +280,18 @@ export default function RoomClient({ code }: RoomClientProps) {
     window.setTimeout(() => setCopiedId(""), 1100);
   }
 
+  async function copyRoomLink() {
+    if (!roomUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(roomUrl);
+      setIsRoomLinkCopied(true);
+      window.setTimeout(() => setIsRoomLinkCopied(false), 1200);
+    } catch {
+      setNotice("คัดลอกลิงก์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    }
+  }
+
   async function updateMessage(id: string, patch: Partial<BridgeMessage>) {
     if (mode === "supabase" && supabase) {
       const { error } = await supabase.from("messages").update(patch).eq("id", id);
@@ -355,11 +369,19 @@ export default function RoomClient({ code }: RoomClientProps) {
               {roomUrl ? <QRCodeSVG value={roomUrl} size={172} /> : null}
             </div>
             <button
-              onClick={() => navigator.clipboard.writeText(roomUrl)}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 px-3 py-2 text-sm font-semibold text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white"
+              type="button"
+              onClick={copyRoomLink}
+              disabled={!roomUrl}
+              className={cn(
+                "mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60",
+                isRoomLinkCopied
+                  ? "animate-[copy-confirm_420ms_ease-out] border-emerald-300/70 bg-emerald-400/15 text-emerald-100 shadow-[0_0_22px_rgba(52,211,153,0.16)]"
+                  : "border-neutral-700 text-neutral-200 hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white",
+              )}
+              aria-live="polite"
             >
-              <LinkIcon className="size-4" />
-              Copy room link
+              {isRoomLinkCopied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
+              {isRoomLinkCopied ? "Copied!" : "Copy room link"}
             </button>
           </div>
 

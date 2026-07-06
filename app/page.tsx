@@ -125,10 +125,13 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setIsGuideOpen(true)}
-                className="grid size-12 place-items-center rounded-lg border border-neutral-700 bg-black/70 text-white transition hover:border-neutral-500 hover:bg-neutral-900 focus:outline-none focus:ring-4 focus:ring-neutral-500/20"
+                className="group relative grid size-12 place-items-center overflow-hidden rounded-lg border border-neutral-700 bg-black/70 text-white transition hover:animate-[guide-button-hover_720ms_ease-in-out_infinite] hover:border-emerald-300/70 hover:bg-neutral-900 active:scale-95 focus:outline-none focus:ring-4 focus:ring-neutral-500/20"
                 aria-label="Open usage guide"
               >
-                <BookOpen className="size-6" />
+                <span className="absolute inset-0 rounded-lg bg-emerald-300/0 transition group-hover:animate-[guide-button-glow_720ms_ease-in-out_infinite]" />
+                <BookOpen
+                  className="relative size-6 transition-transform group-hover:animate-[guide-icon-hover_720ms_ease-in-out_infinite]"
+                />
               </button>
             </div>
             <div className="mt-4 flex items-center gap-2 text-sm text-emerald-200">
