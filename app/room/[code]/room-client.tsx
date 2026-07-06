@@ -5,15 +5,15 @@ import {
   Download,
   FileText,
   FileUp,
+  Home,
   LinkIcon,
   Pin,
   PinOff,
   QrCode,
   Send,
   Trash2,
-  Wifi,
-  WifiOff,
 } from "lucide-react";
+import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
@@ -326,9 +326,18 @@ export default function RoomClient({ code }: RoomClientProps) {
     <main className="relative isolate min-h-screen overflow-hidden px-3 py-3 font-mono sm:px-5 lg:px-6">
       <GridBackground size={32} />
       <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[20rem_1fr]">
-        <aside className="rounded-xl border border-slate-800 bg-slate-950/90 p-4 shadow-sm backdrop-blur lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
+        <aside className="rounded-xl border border-neutral-700/70 bg-neutral-950/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
           <div>
-            <p className="text-sm font-medium text-slate-400">Room Code</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-neutral-400">Room Code</p>
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 rounded-lg border border-neutral-700/70 bg-neutral-950/30 px-3 py-2 text-sm font-semibold text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white"
+              >
+                <Home className="size-4" />
+                Home
+              </Link>
+            </div>
             <h1 className="mt-1 text-3xl font-bold tracking-[0.2em] text-white">{code}</h1>
           </div>
 
@@ -337,16 +346,8 @@ export default function RoomClient({ code }: RoomClientProps) {
             <Stat label="Files" value={files.filter((file) => !file.deleted_at).length} />
           </div>
 
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-black/40 px-3 py-2 text-sm text-slate-300">
-            {status === "online" || status === "local" ? <Wifi className="size-4 text-emerald-400" /> : <WifiOff className="size-4 text-amber-400" />}
-            {status === "online" && "Supabase realtime"}
-            {status === "local" && "Local network online"}
-            {status === "connecting" && "Connecting..."}
-            {status === "error" && "Connection issue"}
-          </div>
-
-          <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900 p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+          <div className="mt-4 rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-3 backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-neutral-100">
               <QrCode className="size-4" />
               Scan to join
             </div>
@@ -355,31 +356,31 @@ export default function RoomClient({ code }: RoomClientProps) {
             </div>
             <button
               onClick={() => navigator.clipboard.writeText(roomUrl)}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 px-3 py-2 text-sm font-semibold text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white"
             >
               <LinkIcon className="size-4" />
               Copy room link
             </button>
           </div>
 
-          <div className="mt-4 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-slate-300">
+          <div className="mt-4 rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-3 text-sm leading-6 text-neutral-300 backdrop-blur-sm">
             เปิดห้องนี้บนอุปกรณ์อีกเครื่อง แล้วส่งข้อความหรือไฟล์ให้แสดงทันทีใน timeline เดียวกัน
           </div>
         </aside>
 
-        <section className="flex min-h-[75vh] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-950/90 shadow-sm backdrop-blur lg:h-[calc(100vh-1.5rem)]">
-          <div className="border-b border-slate-800 p-3 sm:p-4">
+        <section className="flex min-h-[75vh] flex-col overflow-hidden rounded-xl border border-neutral-700/70 bg-neutral-950/55 shadow-sm backdrop-blur-md lg:h-[calc(100vh-1.5rem)]">
+          <div className="border-b border-neutral-800/80 p-3 sm:p-4">
             <form onSubmit={sendMessage} className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder="Paste text, link, code, email, phone number..."
-                className="min-h-24 resize-none rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-slate-500 focus:ring-4 focus:ring-slate-500/20"
+                className="min-h-24 resize-none rounded-lg border border-neutral-700/70 bg-neutral-800/30 px-4 py-3 text-neutral-100 outline-none backdrop-blur-sm transition placeholder:text-neutral-500 focus:border-neutral-500 focus:ring-4 focus:ring-neutral-500/20"
               />
               <div className="grid grid-cols-2 gap-2 sm:w-14 sm:grid-cols-1">
                 <button
                   disabled={!text.trim() || !room}
-                  className="grid h-12 place-items-center rounded-lg border border-slate-700 bg-black text-white transition hover:border-slate-500 hover:bg-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
+                  className="grid h-12 place-items-center rounded-lg border border-neutral-700 bg-neutral-950/60 text-white transition hover:border-neutral-500 hover:bg-neutral-900/60 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Send message"
                 >
                   <Send className="size-5" />
@@ -388,7 +389,7 @@ export default function RoomClient({ code }: RoomClientProps) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!room || uploading}
-                  className="grid h-12 place-items-center rounded-lg border border-slate-800 text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
+                  className="grid h-12 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/30 text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-900/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Upload file"
                 >
                   {uploading ? (
@@ -400,22 +401,21 @@ export default function RoomClient({ code }: RoomClientProps) {
               </div>
               <input ref={fileInputRef} onChange={uploadFile} type="file" className="hidden" />
             </form>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+            <div className="mt-3 text-xs text-neutral-400">
               <span>รองรับรูปภาพ, PDF, TXT, DOCX, ZIP และไฟล์ทั่วไป</span>
-              <span>{uploading ? "Uploading..." : mode === "supabase" ? "Storage: Supabase" : "Storage: Local fallback"}</span>
             </div>
             {notice ? <p className="mt-3 rounded-lg bg-amber-950/40 px-3 py-2 text-sm text-amber-100">{notice}</p> : null}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-4">
             {timeline.length === 0 ? (
-              <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-slate-700 bg-black/30 text-center">
+              <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-neutral-700/70 bg-neutral-950/25 text-center backdrop-blur-sm">
                 <div className="max-w-sm px-6">
-                  <div className="mx-auto grid size-12 place-items-center rounded-lg border border-slate-800 bg-black text-slate-100 shadow-sm">
+                  <div className="mx-auto grid size-12 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/60 text-neutral-100 shadow-sm">
                     <FileText className="size-6" />
                   </div>
-                  <p className="mt-4 font-semibold text-slate-100">ยังไม่มีข้อความหรือไฟล์ในห้องนี้</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">ส่งลิงก์ โค้ด โน้ต หรือไฟล์แรกเพื่อเริ่ม bridge ได้เลย</p>
+                  <p className="mt-4 font-semibold text-neutral-100">ยังไม่มีข้อความหรือไฟล์ในห้องนี้</p>
+                  <p className="mt-1 text-sm leading-6 text-neutral-400">ส่งลิงก์ โค้ด โน้ต หรือไฟล์แรกเพื่อเริ่ม bridge ได้เลย</p>
                 </div>
               </div>
             ) : (
@@ -446,8 +446,8 @@ export default function RoomClient({ code }: RoomClientProps) {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
-      <p className="text-xs text-slate-400">{label}</p>
+    <div className="rounded-lg border border-neutral-700/70 bg-neutral-950/30 p-3 backdrop-blur-sm">
+      <p className="text-xs text-neutral-400">{label}</p>
       <p className="mt-1 text-xl font-bold text-white">{value}</p>
     </div>
   );
@@ -470,14 +470,14 @@ function MessageCard({
     <article
       className={cn(
         "rounded-lg border p-3 shadow-sm transition",
-        message.is_pinned ? "border-slate-500 bg-slate-900" : "border-slate-800 bg-slate-900",
+        message.is_pinned ? "border-neutral-500 bg-neutral-800/40" : "border-neutral-700/70 bg-neutral-800/30",
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="rounded-full bg-black px-2 py-1 font-medium uppercase text-slate-300">{message.type}</span>
+        <div className="flex items-center gap-2 text-xs text-neutral-400">
+          <span className="rounded-full bg-neutral-950/70 px-2 py-1 font-medium uppercase text-neutral-300">{message.type}</span>
           <span>{formatTime(message.created_at)}</span>
-          {message.is_pinned ? <span className="font-medium text-slate-100">Pinned</span> : null}
+          {message.is_pinned ? <span className="font-medium text-neutral-100">Pinned</span> : null}
         </div>
         <div className="flex items-center gap-1">
           <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy}>
@@ -491,7 +491,7 @@ function MessageCard({
           </IconButton>
         </div>
       </div>
-      <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-slate-100">
+      <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-neutral-100">
         {message.text}
       </pre>
     </article>
@@ -500,20 +500,20 @@ function MessageCard({
 
 function FileCard({ file, onDelete }: { file: BridgeFile; onDelete: () => void }) {
   return (
-    <article className="rounded-lg border border-slate-800 bg-slate-900 p-3 shadow-sm transition">
+    <article className="rounded-lg border border-neutral-700/70 bg-neutral-800/30 p-3 shadow-sm transition backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-slate-800 bg-black text-slate-100">
+          <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-neutral-700/70 bg-neutral-950/60 text-neutral-100">
             <FileText className="size-5" />
           </div>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-              <span className="rounded-full bg-black px-2 py-1 font-medium uppercase text-slate-300">file</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+              <span className="rounded-full bg-neutral-950/70 px-2 py-1 font-medium uppercase text-neutral-300">file</span>
               <span>{formatTime(file.created_at)}</span>
               <span>{formatFileSize(file.file_size)}</span>
             </div>
-            <p className="mt-2 break-words text-sm font-semibold text-slate-100">{file.file_name}</p>
-            <p className="mt-1 break-words text-xs text-slate-400">{file.file_type || "application/octet-stream"}</p>
+            <p className="mt-2 break-words text-sm font-semibold text-neutral-100">{file.file_name}</p>
+            <p className="mt-1 break-words text-xs text-neutral-400">{file.file_type || "application/octet-stream"}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -522,7 +522,7 @@ function FileCard({ file, onDelete }: { file: BridgeFile; onDelete: () => void }
             download={file.file_name}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 transition hover:bg-black hover:text-white"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-neutral-300 transition hover:bg-neutral-950/70 hover:text-white"
           >
             <Download className="size-4" />
             <span className="hidden sm:inline">Download</span>
@@ -548,7 +548,7 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 transition hover:bg-black hover:text-white"
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-neutral-300 transition hover:bg-neutral-950/70 hover:text-white"
       type="button"
     >
       {children}

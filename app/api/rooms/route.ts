@@ -3,8 +3,18 @@ import { localStore } from "@/lib/local-store";
 import type { Room } from "@/lib/types";
 import { generateRoomCode } from "@/lib/utils";
 
-export async function POST() {
-  let code = generateRoomCode();
+export async function POST(request: Request) {
+  const payload = (await request.json().catch(() => ({}))) as { code?: string };
+  let code = payload.code?.trim().toUpperCase() || generateRoomCode();
+
+  if (!/^[A-Z0-9]{4,12}$/.test(code)) {
+    return NextResponse.json({ error: "Invalid room code" }, { status: 400 });
+  }
+
+  if (localStore.rooms.has(code)) {
+    return NextResponse.json({ error: "Room code already exists" }, { status: 409 });
+  }
+
   while (localStore.rooms.has(code)) {
     code = generateRoomCode();
   }
