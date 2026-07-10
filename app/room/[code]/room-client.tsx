@@ -12,23 +12,31 @@ import {
   ImageIcon,
   LinkIcon,
   Lock,
+  Pencil,
   Phone,
   Pin,
   PinOff,
   QrCode,
+  RotateCcw,
+  Search,
   Send,
+  Share2,
   TimerReset,
   Trash2,
   Unlock,
+  Users,
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { GridBackground } from "@/components/grid-background";
+import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ImagesBadge } from "@/components/ui/images-badge";
 import { Terminal } from "@/components/ui/terminal";
+import { supabase } from "@/lib/supabase";
+import { useAuthSession } from "@/lib/use-auth";
 import type { BridgeFile, BridgeMessage, RoomView } from "@/lib/types";
 import { cn, formatFileSize, formatTime } from "@/lib/utils";
 
@@ -40,6 +48,14 @@ type Status = "connecting" | "online" | "local" | "error" | "expired" | "locked"
 type TimelineItem =
   | { kind: "message"; created_at: string; item: BridgeMessage }
   | { kind: "file"; created_at: string; item: BridgeFile };
+type TimelineFilter = "all" | "messages" | "files" | "pinned" | "links";
+type PresencePayload = {
+  client_id: string;
+  user_id: string | null;
+  label: string;
+  online_at: string;
+  last_seen_message_id: string | null;
+};
 
 const uploadBadgeImages = [
   "https://assets.aceternity.com/pro/agenforce-1.webp",
@@ -48,6 +64,7 @@ const uploadBadgeImages = [
 ];
 
 export default function RoomClient({ code }: RoomClientProps) {
+  const auth = useAuthSession();
   const [room, setRoom] = useState<RoomView | null>(null);
   const [messages, setMessages] = useState<BridgeMessage[]>([]);
   const [files, setFiles] = useState<BridgeFile[]>([]);
@@ -58,12 +75,20 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [isRoomLinkCopied, setIsRoomLinkCopied] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [query, setQuery] = useState("");
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
   const [roomPassword, setRoomPassword] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [presences, setPresences] = useState<PresencePayload[]>([]);
+  const [ownerPassword, setOwnerPassword] = useState("");
+  const [ownerBusy, setOwnerBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
+  const presenceClientId = useRef(crypto.randomUUID());
 
   const roomUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -81,7 +106,33 @@ export default function RoomClient({ code }: RoomClientProps) {
     });
   }, [files, messages]);
 
+  const filteredTimeline = useMemo(() => {
+    const cleanQuery = query.trim().toLocaleLowerCase();
+
+    return timeline.filter((entry) => {
+      if (timelineFilter === "messages" && entry.kind !== "message") return false;
+      if (timelineFilter === "files" && entry.kind !== "file") return false;
+      if (timelineFilter === "pinned" && (entry.kind !== "message" || !entry.item.is_pinned)) return false;
+      if (timelineFilter === "links" && (entry.kind !== "message" || entry.item.type !== "link")) return false;
+      if (!cleanQuery) return true;
+
+      const searchable = entry.kind === "message" ? `${entry.item.type} ${entry.item.text}` : `${entry.item.file_name} ${entry.item.file_type}`;
+      return searchable.toLocaleLowerCase().includes(cleanQuery);
+    });
+  }, [query, timeline, timelineFilter]);
+
+  const recentMessages = useMemo(
+    () => messages.filter((message) => !message.deleted_at).slice(-5).reverse(),
+    [messages],
+  );
+  const latestMessageId = messages.filter((message) => !message.deleted_at).at(-1)?.id ?? null;
+  const seenCount = latestMessageId
+    ? presences.filter((presence) => presence.last_seen_message_id === latestMessageId).length
+    : 0;
+  const canWrite = Boolean(room && (!room.is_locked || room.is_owner));
+
   useEffect(() => {
+    if (auth.loading) return;
     const savedPassword = window.sessionStorage.getItem(`textbridge-room-password:${code}`) ?? "";
     if (savedPassword) {
       setRoomPassword(savedPassword);
@@ -90,17 +141,58 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
 
     void loadRoom();
-  }, [code]);
+  }, [code, auth.loading, auth.session?.access_token]);
 
   useEffect(() => {
     if (!room) return;
+    const realtimeClient = supabase;
 
-    const interval = window.setInterval(() => {
-      void loadTimeline(roomPassword);
-    }, 1500);
+    if (room.storage_mode === "local" || !realtimeClient) {
+      const interval = window.setInterval(() => {
+        void loadTimeline(roomPassword);
+      }, 1500);
+      return () => window.clearInterval(interval);
+    }
 
-    return () => window.clearInterval(interval);
-  }, [code, room, roomPassword]);
+    const channel = realtimeClient
+      .channel(`room-${room.id}`, {
+        config: { presence: { key: `${auth.session?.user.id ?? "guest"}:${presenceClientId.current}` } },
+      })
+      .on("presence", { event: "sync" }, () => {
+        const nextPresences = Object.values(channel.presenceState()).flat() as unknown as PresencePayload[];
+        setPresences(nextPresences);
+      })
+      .on("broadcast", { event: "refresh" }, () => void loadTimeline(roomPassword))
+      .subscribe((subscriptionStatus) => {
+        if (subscriptionStatus !== "SUBSCRIBED") return;
+        presenceChannelRef.current = channel;
+        void channel.track({
+          client_id: presenceClientId.current,
+          user_id: auth.session?.user.id ?? null,
+          label: auth.session?.user.email ?? "Guest device",
+          online_at: new Date().toISOString(),
+          last_seen_message_id: latestMessageId,
+        } satisfies PresencePayload);
+      });
+
+    return () => {
+      presenceChannelRef.current = null;
+      setPresences([]);
+      void realtimeClient.removeChannel(channel);
+    };
+  }, [code, room?.id, room?.storage_mode, roomPassword, auth.session?.user.id, auth.session?.access_token]);
+
+  useEffect(() => {
+    const channel = presenceChannelRef.current;
+    if (!channel) return;
+    void channel.track({
+      client_id: presenceClientId.current,
+      user_id: auth.session?.user.id ?? null,
+      label: auth.session?.user.email ?? "Guest device",
+      online_at: new Date().toISOString(),
+      last_seen_message_id: latestMessageId,
+    } satisfies PresencePayload);
+  }, [latestMessageId, auth.session?.user.id]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -112,19 +204,21 @@ export default function RoomClient({ code }: RoomClientProps) {
     const handlePaste = (event: ClipboardEvent) => {
       if (uploading) return;
 
-      const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith("image/"));
-      const pastedImage = imageItem?.getAsFile();
+      const pastedFiles = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
 
-      if (!pastedImage) return;
+      if (pastedFiles.length === 0) return;
 
       event.preventDefault();
-      const extension = pastedImage.type.split("/")[1] || "png";
-      const upload =
-        pastedImage.name && pastedImage.name.trim()
-          ? pastedImage
-          : new File([pastedImage], `clipboard-${Date.now()}.${extension}`, { type: pastedImage.type });
+      const uploads = pastedFiles.map((file, index) => {
+        if (file.name.trim()) return file;
+        const extension = file.type.split("/")[1] || "bin";
+        return new File([file], `clipboard-${Date.now()}-${index + 1}.${extension}`, { type: file.type });
+      });
 
-      void uploadSelectedFile(upload);
+      void uploadSelectedFiles(uploads);
     };
 
     window.addEventListener("paste", handlePaste);
@@ -134,7 +228,14 @@ export default function RoomClient({ code }: RoomClientProps) {
   function getRoomHeaders(password = roomPassword) {
     const headers: HeadersInit = {};
     if (password) headers["x-room-password"] = password;
+    if (auth.session) headers.Authorization = `Bearer ${auth.session.access_token}`;
     return headers;
+  }
+
+  function broadcastRefresh() {
+    const channel = presenceChannelRef.current;
+    if (!channel) return;
+    void channel.send({ type: "broadcast", event: "refresh", payload: { at: Date.now() } });
   }
 
   async function loadRoom(password?: string) {
@@ -241,7 +342,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const clean = text.trim();
-    if (!clean || !room) return;
+    if (!clean || !canWrite) return;
 
     setText("");
     const response = await fetch(`/api/rooms/${code}/messages`, {
@@ -261,54 +362,65 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
 
     const message = (await response.json()) as BridgeMessage;
-    setMessages((current) => [...current, message]);
+    setMessages((current) => upsertById(current, message));
+    broadcastRefresh();
   }
 
-  async function uploadSelectedFile(upload: File) {
-    if (!room) return;
+  async function uploadSelectedFiles(uploads: File[]) {
+    if (!canWrite || uploads.length === 0) return;
 
     setUploading(true);
     setNotice("");
+    const errors: string[] = [];
 
     try {
-      const formData = new FormData();
-      formData.append("file", upload);
-      const response = await fetch(`/api/rooms/${code}/files`, {
-        method: "POST",
-        headers: getRoomHeaders(),
-        body: formData,
-      });
+      for (const [index, upload] of uploads.entries()) {
+        setUploadProgress(`${index + 1}/${uploads.length}: ${upload.name}`);
+        const formData = new FormData();
+        formData.append("file", upload);
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error ?? "Upload failed.");
+        try {
+          const response = await fetch(`/api/rooms/${code}/files`, {
+            method: "POST",
+            headers: getRoomHeaders(),
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(payload.error ?? "Upload failed.");
+          }
+
+          const file = (await response.json()) as BridgeFile;
+          setFiles((current) => upsertById(current, file));
+        } catch (caught) {
+          errors.push(`${upload.name}: ${caught instanceof Error ? caught.message : "Upload failed."}`);
+        }
       }
 
-      const file = (await response.json()) as BridgeFile;
-      setFiles((current) => [...current, file]);
-    } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : "Upload failed.");
+      setNotice(errors.length > 0 ? `${uploads.length - errors.length}/${uploads.length} files uploaded. ${errors.join(" ")}` : `${uploads.length} file${uploads.length > 1 ? "s" : ""} uploaded.`);
+      if (uploads.length > errors.length) broadcastRefresh();
     } finally {
       setUploading(false);
+      setUploadProgress("");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
   async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
-    const upload = event.target.files?.[0];
-    if (!upload) return;
-    await uploadSelectedFile(upload);
+    const uploads = Array.from(event.target.files ?? []);
+    await uploadSelectedFiles(uploads);
   }
 
   function handleDragEnter(event: DragEvent<HTMLElement>) {
     event.preventDefault();
-    if (!room || uploading) return;
+    if (!canWrite || uploading) return;
     setIsDraggingFile(true);
   }
 
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
-    if (!room || uploading) return;
+    if (!canWrite || uploading) return;
     event.dataTransfer.dropEffect = "copy";
     setIsDraggingFile(true);
   }
@@ -323,12 +435,10 @@ export default function RoomClient({ code }: RoomClientProps) {
   async function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     setIsDraggingFile(false);
-    if (!room || uploading) return;
+    if (!canWrite || uploading) return;
 
-    const upload = event.dataTransfer.files?.[0];
-    if (!upload) return;
-
-    await uploadSelectedFile(upload);
+    const uploads = Array.from(event.dataTransfer.files ?? []);
+    await uploadSelectedFiles(uploads);
   }
 
   async function copyMessage(message: BridgeMessage) {
@@ -349,6 +459,64 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
   }
 
+  async function shareRoom() {
+    if (!roomUrl) return;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `TextBridge room ${code}`, text: `Join my TextBridge room: ${code}`, url: roomUrl });
+        return;
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      }
+    }
+
+    await copyRoomLink();
+  }
+
+  function exportRoom() {
+    if (!room) return;
+
+    const payload = {
+      exported_at: new Date().toISOString(),
+      room: { code: room.code, name: room.name, created_at: room.created_at, expired_at: room.expired_at },
+      messages: messages.filter((message) => !message.deleted_at),
+      files: files.filter((file) => !file.deleted_at),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `textbridge-${code}-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    window.URL.revokeObjectURL(objectUrl);
+  }
+
+  async function runOwnerAction(action: Record<string, unknown>, successMessage: string) {
+    if (!room?.is_owner || !auth.session || ownerBusy) return;
+    setOwnerBusy(true);
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/rooms/${code}/owner`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.session.access_token}` },
+        body: JSON.stringify(action),
+      });
+      const payload = (await response.json().catch(() => ({}))) as RoomView & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Owner action failed.");
+      setRoom(payload);
+      setOwnerPassword("");
+      setNotice(successMessage);
+      await loadTimeline();
+      broadcastRefresh();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Owner action failed.");
+    } finally {
+      setOwnerBusy(false);
+    }
+  }
+
   async function updateMessage(id: string, patch: Partial<BridgeMessage>) {
     const response = await fetch(`/api/rooms/${code}/messages/${id}`, {
       method: "PATCH",
@@ -366,7 +534,26 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
 
     const updated = (await response.json()) as BridgeMessage;
-    setMessages((current) => current.map((message) => (message.id === id ? updated : message)));
+    setMessages((current) => upsertById(current, updated));
+    broadcastRefresh();
+  }
+
+  async function resendMessage(message: BridgeMessage) {
+    const response = await fetch(`/api/rooms/${code}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getRoomHeaders() },
+      body: JSON.stringify({ text: message.text }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setNotice(payload.error ?? "Unable to resend message.");
+      return;
+    }
+
+    const resent = (await response.json()) as BridgeMessage;
+    setMessages((current) => upsertById(current, resent));
+    broadcastRefresh();
   }
 
   async function deleteMessage(id: string) {
@@ -390,7 +577,8 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
 
     const updated = (await response.json()) as BridgeFile;
-    setFiles((current) => current.map((file) => (file.id === id ? updated : file)));
+    setFiles((current) => upsertById(current, updated));
+    broadcastRefresh();
   }
 
   if (status === "locked" && !room) {
@@ -470,6 +658,7 @@ export default function RoomClient({ code }: RoomClientProps) {
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-medium text-th-text-muted">Room Code</p>
               <div className="flex items-center gap-2">
+                <AuthButton compact />
                 <ThemeToggle />
                 <Link
                   href="/"
@@ -510,20 +699,40 @@ export default function RoomClient({ code }: RoomClientProps) {
                 {roomUrl ? <QRCodeSVG value={roomUrl} size={172} /> : null}
               </div>
             ) : null}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={copyRoomLink}
+                disabled={!roomUrl}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60",
+                  isRoomLinkCopied
+                    ? "animate-[copy-confirm_420ms_ease-out] border-th-accent/70 bg-th-accent-soft/15 text-th-accent-text"
+                    : "border-th-border text-th-text-sub hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text",
+                )}
+                aria-live="polite"
+              >
+                {isRoomLinkCopied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
+                {isRoomLinkCopied ? "Copied!" : "Copy link"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void shareRoom()}
+                disabled={!roomUrl}
+                className="flex items-center justify-center gap-2 rounded-lg border border-th-border px-3 py-2 text-xs font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:opacity-60"
+              >
+                <Share2 className="size-4" />
+                Share
+              </button>
+            </div>
             <button
               type="button"
-              onClick={copyRoomLink}
-              disabled={!roomUrl}
-              className={cn(
-                "mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60",
-                isRoomLinkCopied
-                  ? "animate-[copy-confirm_420ms_ease-out] border-th-accent/70 bg-th-accent-soft/15 text-th-accent-text shadow-[0_0_22px_rgba(52,211,153,0.16)]"
-                  : "border-th-border text-th-text-sub hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text",
-              )}
-              aria-live="polite"
+              onClick={exportRoom}
+              disabled={!room}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-th-border/70 px-3 py-2 text-xs font-semibold text-th-text-muted transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text"
             >
-              {isRoomLinkCopied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
-              {isRoomLinkCopied ? "Copied!" : "Copy room link"}
+              <Download className="size-4" />
+              Export room data
             </button>
           </div>
 
@@ -540,7 +749,43 @@ export default function RoomClient({ code }: RoomClientProps) {
               <span className="inline-block size-2 rounded-full bg-th-accent" />
               <span>{status === "online" ? "Supabase live sync" : status === "local" ? "Local mode sync" : "Connecting..."}</span>
             </div>
+            <div className="flex items-center gap-2">
+              <Users className="size-4 text-th-text-muted" />
+              <span>{status === "online" ? `${presences.length || 1} online${latestMessageId ? `, ${seenCount || 1} seen latest` : ""}` : "Presence needs Supabase"}</span>
+            </div>
+            {room?.is_locked ? (
+              <div className="flex items-center gap-2 text-th-warning-text">
+                <Lock className="size-4" />
+                <span>{room.is_owner ? "Room locked (owner can write)" : "Room locked by owner"}</span>
+              </div>
+            ) : null}
           </div>
+
+          {room?.is_owner ? (
+            <div className="mt-4 rounded-lg border border-th-accent/25 bg-th-accent-soft/5 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-th-accent-text">Owner controls</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" disabled={ownerBusy} onClick={() => void runOwnerAction({ action: "set_lock", locked: !room.is_locked }, room.is_locked ? "Room unlocked." : "Room locked.")} className="rounded-md border border-th-border px-2 py-2 text-xs font-semibold text-th-text-sub disabled:opacity-50">
+                  {room.is_locked ? "Unlock" : "Lock"}
+                </button>
+                <button type="button" disabled={ownerBusy} onClick={() => void runOwnerAction({ action: "extend_expiry", minutes: 1440 }, "Expiry extended by 24 hours.")} className="rounded-md border border-th-border px-2 py-2 text-xs font-semibold text-th-text-sub disabled:opacity-50">
+                  +24 hours
+                </button>
+                <button type="button" disabled={ownerBusy} onClick={() => void runOwnerAction({ action: "make_permanent" }, "Room is now permanent.")} className="rounded-md border border-th-border px-2 py-2 text-xs font-semibold text-th-text-sub disabled:opacity-50">
+                  Keep forever
+                </button>
+                <button type="button" disabled={ownerBusy} onClick={() => { if (window.confirm("Clear every message and file from this room?")) void runOwnerAction({ action: "clear_room" }, "Room cleared."); }} className="rounded-md border border-red-400/25 px-2 py-2 text-xs font-semibold text-th-error-text disabled:opacity-50">
+                  Clear room
+                </button>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <input value={ownerPassword} onChange={(event) => setOwnerPassword(event.target.value)} type="password" placeholder="New password" className="min-w-0 flex-1 rounded-md border border-th-border bg-th-inner/30 px-2 py-2 text-xs text-th-text-sub outline-none" />
+                <button type="button" disabled={ownerBusy || ownerPassword.trim().length < 4} onClick={() => void runOwnerAction({ action: "rotate_password", password: ownerPassword }, "Room password rotated.")} className="rounded-md border border-th-border px-2 py-2 text-xs font-semibold text-th-text-sub disabled:opacity-50">
+                  Rotate
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-4 hidden lg:block">
             <div className="overflow-hidden rounded-xl border border-th-border/70 bg-th-card/30 shadow-sm backdrop-blur-md">
@@ -603,7 +848,7 @@ export default function RoomClient({ code }: RoomClientProps) {
               />
               <div className="grid grid-cols-2 gap-2 sm:w-14 sm:grid-cols-1">
                 <button
-                  disabled={!text.trim() || !room}
+                  disabled={!text.trim() || !canWrite}
                   className="grid h-12 place-items-center rounded-lg border border-th-border bg-th-card/60 text-th-text transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Send message"
                 >
@@ -612,7 +857,7 @@ export default function RoomClient({ code }: RoomClientProps) {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={!room || uploading}
+                  disabled={!canWrite || uploading}
                   className="grid h-12 place-items-center rounded-lg border border-th-border/70 bg-th-card/30 text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Upload file"
                 >
@@ -623,16 +868,57 @@ export default function RoomClient({ code }: RoomClientProps) {
                   )}
                 </button>
               </div>
-              <input ref={fileInputRef} onChange={uploadFile} type="file" className="hidden" />
+              <input ref={fileInputRef} onChange={uploadFile} type="file" multiple className="hidden" />
             </form>
+            {recentMessages.length > 0 ? (
+              <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+                <span className="shrink-0 text-xs font-semibold text-th-text-muted">Recent</span>
+                {recentMessages.map((message) => (
+                  <button
+                    key={message.id}
+                    type="button"
+                    onClick={() => void resendMessage(message)}
+                    title={message.text}
+                    className="inline-flex max-w-48 shrink-0 items-center gap-1.5 truncate rounded-full border border-th-border/70 bg-th-card/35 px-3 py-1.5 text-xs text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/50"
+                  >
+                    <RotateCcw className="size-3.5 shrink-0" />
+                    <span className="truncate">{message.text}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-th-text-muted">
               <span>Supports images, PDF, TXT, DOCX, ZIP, and most common file types.</span>
-              <span className="text-th-accent-text/90">Tip: drag a file here or paste an image with Ctrl+V.</span>
+              <span className="text-th-accent-text/90">Tip: drag, select, or paste multiple files.</span>
             </div>
+            {uploadProgress ? <p className="mt-2 text-xs text-th-accent-text">Uploading {uploadProgress}</p> : null}
+            {room?.is_locked && !room.is_owner ? <p className="mt-2 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-xs text-th-warning-text">The owner locked this room. You can still read and download existing items.</p> : null}
             {notice ? <p className="mt-3 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-sm text-th-warning-text">{notice}</p> : null}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+              <label className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-th-text-faint" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search messages and files"
+                  className="w-full rounded-lg border border-th-border/70 bg-th-inner/30 py-2.5 pl-9 pr-3 text-sm text-th-text-sub outline-none transition placeholder:text-th-text-faint focus:border-th-border-strong"
+                />
+              </label>
+              <select
+                value={timelineFilter}
+                onChange={(event) => setTimelineFilter(event.target.value as TimelineFilter)}
+                className="rounded-lg border border-th-border/70 bg-th-card px-3 py-2.5 text-sm text-th-text-sub outline-none focus:border-th-border-strong"
+              >
+                <option value="all">All items</option>
+                <option value="messages">Messages</option>
+                <option value="files">Files</option>
+                <option value="pinned">Pinned</option>
+                <option value="links">Links</option>
+              </select>
+            </div>
             {timeline.length === 0 ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-th-border/70 bg-th-card/25 text-center backdrop-blur-sm">
                 <div className="max-w-sm px-6">
@@ -643,22 +929,30 @@ export default function RoomClient({ code }: RoomClientProps) {
                   <p className="mt-1 text-sm leading-6 text-th-text-muted">Drop in a note, link, code snippet, or file to start the bridge.</p>
                 </div>
               </div>
+            ) : filteredTimeline.length === 0 ? (
+              <div className="grid min-h-56 place-items-center rounded-lg border border-dashed border-th-border/70 bg-th-card/25 px-6 text-center text-sm text-th-text-muted">
+                No items match this search or filter.
+              </div>
             ) : (
               <div className="space-y-3">
-                {timeline.map((entry) =>
+                {filteredTimeline.map((entry) =>
                   entry.kind === "message" ? (
                     <MessageCard
                       key={`message-${entry.item.id}`}
                       message={entry.item}
+                      writable={canWrite}
                       copied={copiedId === entry.item.id}
                       onCopy={() => copyMessage(entry.item)}
                       onPin={() => updateMessage(entry.item.id, { is_pinned: !entry.item.is_pinned })}
+                      onEdit={(nextText) => updateMessage(entry.item.id, { text: nextText })}
+                      onResend={() => resendMessage(entry.item)}
                       onDelete={() => deleteMessage(entry.item.id)}
                     />
                   ) : (
                     <FileCard
                       key={`file-${entry.item.id}`}
                       file={entry.item}
+                      writable={canWrite}
                       onDelete={() => deleteFile(entry.item.id)}
                       onNotice={setNotice}
                     />
@@ -685,17 +979,42 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function MessageCard({
   message,
+  writable,
   copied,
   onCopy,
   onPin,
+  onEdit,
+  onResend,
   onDelete,
 }: {
   message: BridgeMessage;
+  writable: boolean;
   copied: boolean;
   onCopy: () => void;
   onPin: () => void;
+  onEdit: (text: string) => Promise<void>;
+  onResend: () => void;
   onDelete: () => void;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(message.text);
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function saveEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextText = draft.trim();
+    if (!nextText || nextText === message.text) {
+      setDraft(message.text);
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    await onEdit(nextText);
+    setIsSaving(false);
+    setIsEditing(false);
+  }
+
   return (
     <article
       className={cn(
@@ -713,28 +1032,55 @@ function MessageCard({
           <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy} tone={copied ? "success" : "info"}>
             <Copy className="size-4" />
           </IconButton>
-          <IconButton label={message.is_pinned ? "Unpin" : "Pin"} onClick={onPin} tone={message.is_pinned ? "accent" : "neutral"}>
+          <IconButton label="Resend" onClick={onResend} disabled={!writable}>
+            <RotateCcw className="size-4" />
+          </IconButton>
+          <IconButton label="Edit" onClick={() => setIsEditing((current) => !current)} disabled={!writable}>
+            <Pencil className="size-4" />
+          </IconButton>
+          <IconButton label={message.is_pinned ? "Unpin" : "Pin"} onClick={onPin} tone={message.is_pinned ? "accent" : "neutral"} disabled={!writable}>
             {message.is_pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
           </IconButton>
-          <IconButton label="Delete" onClick={onDelete}>
+          <IconButton label="Delete" onClick={onDelete} disabled={!writable}>
             <Trash2 className="size-4" />
           </IconButton>
         </div>
       </div>
-      <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-th-text-sub">
-        {message.text}
-      </pre>
-      <MessagePreview message={message} />
+      {isEditing ? (
+        <form onSubmit={(event) => void saveEdit(event)} className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            autoFocus
+            className="min-h-24 flex-1 resize-y rounded-lg border border-th-border bg-th-card/50 px-3 py-2 text-sm text-th-text-sub outline-none focus:border-th-border-strong"
+          />
+          <div className="flex gap-2 sm:flex-col">
+            <button disabled={isSaving || !draft.trim()} className="rounded-md border border-th-accent/40 bg-th-accent-soft/10 px-3 py-2 text-xs font-semibold text-th-accent-text disabled:opacity-50">
+              {isSaving ? "Saving..." : "Save"}
+            </button>
+            <button type="button" onClick={() => { setDraft(message.text); setIsEditing(false); }} className="rounded-md border border-th-border px-3 py-2 text-xs font-semibold text-th-text-muted">
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-th-text-sub">{message.text}</pre>
+          <MessagePreview message={message} />
+        </>
+      )}
     </article>
   );
 }
 
 function FileCard({
   file,
+  writable,
   onDelete,
   onNotice,
 }: {
   file: BridgeFile;
+  writable: boolean;
   onDelete: () => void;
   onNotice: (message: string) => void;
 }) {
@@ -795,7 +1141,7 @@ function FileCard({
             <Download className="size-4" />
             <span className="hidden sm:inline">{isDownloading ? "Downloading..." : "Download"}</span>
           </button>
-          <IconButton label="Delete" onClick={onDelete} tone="danger">
+          <IconButton label="Delete" onClick={onDelete} tone="danger" disabled={!writable}>
             <Trash2 className="size-4" />
           </IconButton>
         </div>
@@ -809,18 +1155,22 @@ function IconButton({
   label,
   onClick,
   tone = "neutral",
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   tone?: "neutral" | "danger" | "info" | "success" | "accent";
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
+        "disabled:cursor-not-allowed disabled:opacity-40",
         tone === "danger"
           ? "border-red-400/20 bg-red-500/10 text-th-error-text hover:border-red-400/40 hover:bg-red-500/18 hover:text-th-text"
           : tone === "info"
@@ -1032,4 +1382,9 @@ function isTextPreviewableFile(file: BridgeFile) {
       name.endsWith(ext),
     )
   );
+}
+
+function upsertById<T extends { id: string }>(items: T[], nextItem: T) {
+  const exists = items.some((item) => item.id === nextItem.id);
+  return exists ? items.map((item) => (item.id === nextItem.id ? nextItem : item)) : [...items, nextItem];
 }

@@ -18,11 +18,13 @@ export type Room = {
   expired_at: string | null;
   created_by: string | null;
   is_private: boolean;
+  is_locked: boolean;
 };
 
 export type RoomView = Omit<Room, "password"> & {
   requires_password: boolean;
   storage_mode: "supabase" | "local";
+  is_owner: boolean;
 };
 
 export type BridgeFile = {
