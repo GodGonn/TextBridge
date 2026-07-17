@@ -3,12 +3,13 @@
 import {
   ArrowRight,
   BookOpen,
-  Check,
+  ChevronDown,
   Clock3,
   LogIn,
   Lock,
   MonitorSmartphone,
   Plus,
+  Settings2,
   Shuffle,
   TabletSmartphone,
   Trash2,
@@ -39,9 +40,10 @@ export default function HomePage() {
   const [isRandomizing, setIsRandomizing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [roomPassword, setRoomPassword] = useState("");
-  const [expiresInMinutes, setExpiresInMinutes] = useState(60);
+  const [expiresInMinutes, setExpiresInMinutes] = useState(0);
   const [error, setError] = useState("");
   const [myRooms, setMyRooms] = useState<RoomView[]>([]);
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
@@ -78,8 +80,12 @@ export default function HomePage() {
   }
 
   async function createRoom() {
-    if (!selectedRoomCode || isRandomizing) {
-      setError("Randomize a room code before creating a room.");
+    if (isCreating || isRandomizing) return;
+
+    const customCode = selectedRoomCode.trim().toUpperCase();
+    if (customCode && !/^[A-Z0-9]{4,12}$/.test(customCode)) {
+      setError("Custom room codes need 4-12 letters or numbers.");
+      setIsAdvancedOpen(true);
       return;
     }
 
@@ -98,7 +104,7 @@ export default function HomePage() {
         ...(auth.session ? { Authorization: `Bearer ${auth.session.access_token}` } : {}),
       },
       body: JSON.stringify({
-        code: selectedRoomCode,
+        code: customCode || undefined,
         isPrivate,
         password: isPrivate ? roomPassword.trim() : null,
         expiresInMinutes,
@@ -160,56 +166,87 @@ export default function HomePage() {
           </header>
 
           <section className="rounded-xl border border-th-border/70 bg-th-card/55 p-5 shadow-soft backdrop-blur-md">
-            <div className="mb-5 rounded-lg border border-th-border/70 bg-th-inner/30 p-4 backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm text-th-text-muted">{selectedRoomCode ? "Ready room" : "Random room"}</p>
-                <p
-                  className={cn(
-                    "mt-1 flex h-8 items-center gap-1 text-2xl font-bold tracking-[0.24em] text-th-text",
-                    isRandomizing && "text-th-text-sub",
-                  )}
+            <div className="mb-4 rounded-lg border border-th-border/70 bg-th-inner/30 p-4 backdrop-blur-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-th-accent-text">Ready in one click</p>
+                  <h2 className="mt-2 text-xl font-bold text-th-text">Start a room instantly</h2>
+                  <p className="mt-1 text-sm leading-6 text-th-text-muted">
+                    {selectedRoomCode ? `Your room will use code ${selectedRoomCode}.` : "We will generate a secure room code automatically."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsGuideOpen(true)}
+                  className="group relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-th-border bg-th-overlay/70 text-th-text transition hover:animate-[guide-button-hover_720ms_ease-in-out_infinite] hover:border-th-accent/70 hover:bg-th-elevated active:scale-95 focus:outline-none focus:ring-4 focus:ring-th-border-strong/20"
+                  aria-label="Open usage guide"
                 >
-                  {(selectedRoomCode || "------").split("").map((character, index) => (
-                    <span
-                      key={`${character}-${index}`}
-                      className={cn("inline-block", isRandomizing && "animate-bounce")}
-                      style={{ animationDelay: `${index * 45}ms` }}
-                    >
-                      {character}
-                    </span>
-                  ))}
-                </p>
+                  <span className="absolute inset-0 rounded-lg bg-emerald-300/0 transition group-hover:animate-[guide-button-glow_720ms_ease-in-out_infinite]" />
+                  <BookOpen className="relative size-6 transition-transform group-hover:animate-[guide-icon-hover_720ms_ease-in-out_infinite]" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsGuideOpen(true)}
-                className="group relative grid size-12 place-items-center overflow-hidden rounded-lg border border-th-border bg-th-overlay/70 text-th-text transition hover:animate-[guide-button-hover_720ms_ease-in-out_infinite] hover:border-th-accent/70 hover:bg-th-elevated active:scale-95 focus:outline-none focus:ring-4 focus:ring-th-border-strong/20"
-                aria-label="Open usage guide"
-              >
-                <span className="absolute inset-0 rounded-lg bg-emerald-300/0 transition group-hover:animate-[guide-button-glow_720ms_ease-in-out_infinite]" />
-                <BookOpen
-                  className="relative size-6 transition-transform group-hover:animate-[guide-icon-hover_720ms_ease-in-out_infinite]"
-                />
-              </button>
-            </div>
-            <div className="mt-4 flex items-center gap-2 text-sm text-th-accent-text">
-              <Check className="size-4" />
-              {selectedRoomCode ? "Room code ready" : "Randomize a room number first"}
-            </div>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs text-th-text-muted">
+                <span className="rounded-full border border-th-border/70 bg-th-card/50 px-2.5 py-1">
+                  {isPrivate ? "Private room" : "Open room"}
+                </span>
+                <span className="rounded-full border border-th-border/70 bg-th-card/50 px-2.5 py-1">
+                  {expiresInMinutes === 0 ? "No auto-expire" : `Expires in ${expiryOptions.find((option) => option.value === expiresInMinutes)?.label}`}
+                </span>
+                {auth.session && expiresInMinutes === 0 ? (
+                  <span className="rounded-full border border-th-accent/50 bg-th-accent-soft/10 px-2.5 py-1 text-th-accent-text">Saved to your account</span>
+                ) : null}
+              </div>
             </div>
 
             <button
-              type="button"
-              onClick={randomizeRoomCode}
-              disabled={isRandomizing || isCreating}
-              className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-th-border/70 bg-th-card/30 px-4 py-3 font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={createRoom}
+              disabled={isCreating || isRandomizing}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-th-accent/60 bg-th-accent-soft/15 px-4 py-3.5 font-semibold text-th-text shadow-sm transition hover:border-th-accent hover:bg-th-accent-soft/25 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              <Shuffle className={cn("size-5", isRandomizing && "animate-spin")} />
-              {isRandomizing ? "Randomizing..." : selectedRoomCode ? "Randomize Again" : "Randomize Room Number"}
+              <Plus className="size-5" />
+              {isCreating ? "Creating..." : "Create Room"}
             </button>
 
-            <div className="mb-3 grid gap-3 rounded-lg border border-th-border/70 bg-th-card/30 p-4">
+            <button
+              type="button"
+              onClick={() => setIsAdvancedOpen((open) => !open)}
+              aria-expanded={isAdvancedOpen}
+              aria-controls="advanced-room-options"
+              className="mt-3 flex w-full items-center justify-between rounded-lg border border-th-border/70 bg-th-card/30 px-4 py-3 text-sm font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text"
+            >
+              <span className="flex items-center gap-2"><Settings2 className="size-4" />Advanced options</span>
+              <ChevronDown className={cn("size-4 transition-transform", isAdvancedOpen && "rotate-180")} />
+            </button>
+
+            {isAdvancedOpen ? (
+              <div id="advanced-room-options" className="mt-3 grid gap-4 rounded-lg border border-th-border/70 bg-th-card/30 p-4">
+              <div>
+                <div className="flex items-end justify-between gap-3">
+                  <label htmlFor="custom-room-code" className="text-sm font-semibold text-th-text">Custom room code</label>
+                  <span className="text-xs text-th-text-faint">Optional</span>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    id="custom-room-code"
+                    value={selectedRoomCode}
+                    onChange={(event) => setSelectedRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
+                    placeholder="Leave blank for automatic"
+                    className="min-w-0 flex-1 rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 uppercase tracking-[0.16em] text-th-text-sub outline-none transition placeholder:normal-case placeholder:tracking-normal placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={randomizeRoomCode}
+                    disabled={isRandomizing || isCreating}
+                    className="grid size-12 shrink-0 place-items-center rounded-lg border border-th-border/70 bg-th-elevated/40 text-th-text-muted transition hover:border-th-border-strong hover:text-th-text disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label="Randomize custom room code"
+                    title="Randomize code"
+                  >
+                    <Shuffle className={cn("size-5", isRandomizing && "animate-spin")} />
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-th-text-muted">Use 4-12 letters or numbers, or leave blank for an automatic code.</p>
+              </div>
+
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-th-text">Privacy controls</p>
@@ -267,16 +304,8 @@ export default function HomePage() {
                   ))}
                 </div>
               </div>
-            </div>
-
-            <button
-              onClick={createRoom}
-              disabled={isCreating || isRandomizing || !selectedRoomCode}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-4 py-3 font-semibold text-th-text shadow-sm transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <Plus className="size-5" />
-              {isCreating ? "Creating..." : "Create Room"}
-            </button>
+              </div>
+            ) : null}
 
             <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-th-text-faint">
               <span className="h-px flex-1 bg-th-border-subtle" />
@@ -400,7 +429,7 @@ export default function HomePage() {
       </div>
 
       {isGuideOpen ? <UsageGuide onClose={() => setIsGuideOpen(false)} /> : null}
-      {isCreating ? <CreatingRoomLoading code={selectedRoomCode} /> : null}
+      {isCreating ? <CreatingRoomLoading code={selectedRoomCode || null} /> : null}
     </main>
   );
 }
@@ -425,7 +454,7 @@ function EmptySavedRoomsState({
   );
 }
 
-function CreatingRoomLoading({ code }: { code: string }) {
+function CreatingRoomLoading({ code }: { code: string | null }) {
   return (
     <div
       className="fixed inset-0 z-[60] grid place-items-center bg-th-overlay/80 px-4 py-6 backdrop-blur-md"
@@ -454,7 +483,9 @@ function CreatingRoomLoading({ code }: { code: string }) {
         </div>
 
         <h2 className="mt-2 text-xl font-bold text-th-text">Creating room</h2>
-        <p className="mt-2 text-sm leading-6 text-th-text-muted">Preparing room {code} and getting your devices ready.</p>
+        <p className="mt-2 text-sm leading-6 text-th-text-muted">
+          {code ? `Preparing room ${code} and getting your devices ready.` : "Generating a secure room code and getting your devices ready."}
+        </p>
 
         <div className="mt-5 flex justify-center gap-2">
           {[0, 1, 2].map((index) => (
@@ -474,7 +505,7 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
   const steps = [
     {
       title: "Create a room",
-      body: "Randomize a code, choose privacy and auto-expire, then create the room.",
+      body: "Create a permanent room in one click, or open Advanced options to customize it.",
     },
     {
       title: "Open another device",

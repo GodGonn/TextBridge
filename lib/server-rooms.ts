@@ -125,7 +125,8 @@ function findLocalRoom(code: string) {
 }
 
 export async function createRoom(input: RoomCreateInput) {
-  let code = input.code?.trim().toUpperCase() || generateRoomCode();
+  const requestedCode = input.code?.trim().toUpperCase() || null;
+  let code = requestedCode || generateRoomCode();
   const password = input.password?.trim() || null;
   const isPrivate = Boolean(input.isPrivate || password);
   const expiredAt = getExpiryDate(input.expiresInMinutes);
@@ -135,33 +136,39 @@ export async function createRoom(input: RoomCreateInput) {
   }
 
   if (serverSupabase) {
-    const existing = await findSupabaseRoom(code);
-    if (existing) {
-      return { ok: false as const, status: 409, error: "Room code already exists" };
+    const attempts = requestedCode ? 1 : 8;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) code = generateRoomCode();
+
+      const { data, error } = await serverSupabase
+        .from("rooms")
+        .insert({
+          code,
+          password: password ? hashPassword(password) : null,
+          is_private: isPrivate,
+          expired_at: expiredAt,
+          created_by: input.createdBy ?? null,
+        })
+        .select("*")
+        .single();
+
+      if (error?.code === "23505") {
+        if (requestedCode) return { ok: false as const, status: 409, error: "Room code already exists" };
+        continue;
+      }
+      if (error || !data) {
+        return { ok: false as const, status: 500, error: error?.message ?? "Could not create Supabase room" };
+      }
+      if (input.createdBy && input.accessToken && !expiredAt) {
+        await ensureSavedRoom(input.createdBy, data as Room, input.accessToken);
+      }
+      return { ok: true as const, room: toRoomView(data as Room, "supabase", input.createdBy) };
     }
 
-    const { data, error } = await serverSupabase
-      .from("rooms")
-      .insert({
-        code,
-        password: password ? hashPassword(password) : null,
-        is_private: isPrivate,
-        expired_at: expiredAt,
-        created_by: input.createdBy ?? null,
-      })
-      .select("*")
-      .single();
-
-    if (error || !data) {
-      return { ok: false as const, status: 500, error: error?.message ?? "Could not create Supabase room" };
-    }
-    if (input.createdBy && input.accessToken && !expiredAt) {
-      await ensureSavedRoom(input.createdBy, data as Room, input.accessToken);
-    }
-    return { ok: true as const, room: toRoomView(data as Room, "supabase", input.createdBy) };
+    return { ok: false as const, status: 503, error: "Could not generate a unique room code" };
   }
 
-  if (localStore.rooms.has(code)) {
+  if (requestedCode && localStore.rooms.has(code)) {
     return { ok: false as const, status: 409, error: "Room code already exists" };
   }
 
