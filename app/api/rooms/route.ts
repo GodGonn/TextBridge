@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { createRoom } from "@/lib/server-rooms";
 import { getBearerToken, getRequestUser } from "@/lib/server-auth";
+import { consumeRateLimit, getRequestAddress } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
   try {
+    const rateLimit = consumeRateLimit(`create-room:${getRequestAddress(request)}`, 20, 10 * 60_000);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many rooms created. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+      );
+    }
     const user = await getRequestUser(request);
     const accessToken = getBearerToken(request);
     const payload = (await request.json().catch(() => ({}))) as {

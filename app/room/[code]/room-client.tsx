@@ -26,6 +26,10 @@ import {
   Unlock,
   Users,
   UserRound,
+  Settings2,
+  Star,
+  Smartphone,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
@@ -37,8 +41,17 @@ import { ImagesBadge } from "@/components/ui/images-badge";
 import { Terminal } from "@/components/ui/terminal";
 import { supabase } from "@/lib/supabase";
 import { useAuthSession } from "@/lib/use-auth";
-import type { BridgeFile, BridgeMessage, RoomView } from "@/lib/types";
+import type { BridgeFile, BridgeMessage, DeviceProfile, RoomView } from "@/lib/types";
 import { cn, formatFileSize, formatTime } from "@/lib/utils";
+import { clearPendingShare, getPendingShare, getSharedText } from "@/lib/share-target";
+import {
+  createDeviceProfile,
+  getDefaultRoomCode,
+  getDeviceHeaders,
+  getDeviceProfile,
+  saveDeviceProfile,
+  setDefaultRoomCode,
+} from "@/lib/device-profile";
 
 type RoomClientProps = {
   code: string;
@@ -55,6 +68,8 @@ type PresencePayload = {
   label: string;
   online_at: string;
   last_seen_message_id: string | null;
+  device_id: string | null;
+  color: string;
 };
 
 const uploadBadgeImages = [
@@ -73,27 +88,32 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [notice, setNotice] = useState("");
   const [copiedId, setCopiedId] = useState("");
   const [isRoomLinkCopied, setIsRoomLinkCopied] = useState(false);
-  const [isQrOpen, setIsQrOpen] = useState(true);
+  const [isQrOpen, setIsQrOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [query, setQuery] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
+  const [senderFilter, setSenderFilter] = useState("all");
   const [roomPassword, setRoomPassword] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [presences, setPresences] = useState<PresencePayload[]>([]);
   const [ownerPassword, setOwnerPassword] = useState("");
   const [ownerBusy, setOwnerBusy] = useState(false);
+  const [deviceProfile, setDeviceProfile] = useState<DeviceProfile | null>(null);
+  const [deviceNameInput, setDeviceNameInput] = useState("");
+  const [isDeviceDialogOpen, setIsDeviceDialogOpen] = useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [isDefaultRoom, setIsDefaultRoom] = useState(false);
+  const [lastSeenAt, setLastSeenAt] = useState(0);
+  const [roomUrl, setRoomUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
   const presenceClientId = useRef(crypto.randomUUID());
-
-  const roomUrl = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return `${window.location.origin}/room/${code}`;
-  }, [code]);
+  const sharedPayloadHandledRef = useRef(false);
 
   const timeline = useMemo<TimelineItem[]>(() => {
     return [
@@ -114,12 +134,27 @@ export default function RoomClient({ code }: RoomClientProps) {
       if (timelineFilter === "files" && entry.kind !== "file") return false;
       if (timelineFilter === "pinned" && (entry.kind !== "message" || !entry.item.is_pinned)) return false;
       if (timelineFilter === "links" && (entry.kind !== "message" || entry.item.type !== "link")) return false;
+      if (senderFilter !== "all" && entry.item.sender_device_id !== senderFilter) return false;
       if (!cleanQuery) return true;
 
-      const searchable = entry.kind === "message" ? `${entry.item.type} ${entry.item.text}` : `${entry.item.file_name} ${entry.item.file_type}`;
+      const searchable = entry.kind === "message"
+        ? `${entry.item.sender_name ?? ""} ${entry.item.type} ${entry.item.text}`
+        : `${entry.item.sender_name ?? ""} ${entry.item.file_name} ${entry.item.file_type}`;
       return searchable.toLocaleLowerCase().includes(cleanQuery);
     });
-  }, [query, timeline, timelineFilter]);
+  }, [query, senderFilter, timeline, timelineFilter]);
+
+  const senderOptions = useMemo(() => {
+    const senders = new Map<string, { name: string; color: string }>();
+    for (const entry of timeline) {
+      if (!entry.item.sender_device_id) continue;
+      senders.set(entry.item.sender_device_id, {
+        name: entry.item.sender_name ?? "Unknown device",
+        color: entry.item.sender_color ?? "#a3a3a3",
+      });
+    }
+    return Array.from(senders.entries());
+  }, [timeline]);
 
   const recentMessages = useMemo(
     () => messages.filter((message) => !message.deleted_at).slice(-5).reverse(),
@@ -130,6 +165,50 @@ export default function RoomClient({ code }: RoomClientProps) {
     ? presences.filter((presence) => presence.last_seen_message_id === latestMessageId).length
     : 0;
   const canWrite = Boolean(room && (!room.is_locked || room.is_owner));
+  const canSend = canWrite && Boolean(deviceProfile);
+  const unreadCount = useMemo(() => timeline.filter((entry) => (
+    new Date(entry.created_at).getTime() > lastSeenAt &&
+    entry.item.sender_device_id !== deviceProfile?.id
+  )).length, [deviceProfile?.id, lastSeenAt, timeline]);
+
+  useEffect(() => {
+    setRoomUrl(`${window.location.origin}/room/${code}`);
+  }, [code]);
+
+  useEffect(() => {
+    const savedProfile = getDeviceProfile();
+    if (savedProfile) {
+      setDeviceProfile(savedProfile);
+      setDeviceNameInput(savedProfile.name);
+    } else {
+      setIsDeviceDialogOpen(true);
+    }
+    setIsDefaultRoom(getDefaultRoomCode() === code);
+    const savedSeenAt = Number(window.localStorage.getItem(`textbridge-last-seen:${code}`));
+    const initialSeenAt = Number.isFinite(savedSeenAt) && savedSeenAt > 0 ? savedSeenAt : Date.now();
+    setLastSeenAt(initialSeenAt);
+    if (!savedSeenAt) window.localStorage.setItem(`textbridge-last-seen:${code}`, String(initialSeenAt));
+  }, [code]);
+
+  useEffect(() => {
+    document.title = unreadCount > 0 ? `(${unreadCount}) ${code} · TextBridge` : `${code} · TextBridge`;
+    return () => { document.title = "TextBridge"; };
+  }, [code, unreadCount]);
+
+  useEffect(() => {
+    const markVisibleItemsSeen = () => {
+      if (document.hidden || timeline.length === 0) return;
+      const latestAt = Math.max(...timeline.map((entry) => new Date(entry.created_at).getTime()));
+      setLastSeenAt(latestAt);
+      window.localStorage.setItem(`textbridge-last-seen:${code}`, String(latestAt));
+    };
+    const timeout = window.setTimeout(markVisibleItemsSeen, 1800);
+    document.addEventListener("visibilitychange", markVisibleItemsSeen);
+    return () => {
+      window.clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", markVisibleItemsSeen);
+    };
+  }, [code, timeline.length]);
 
   useEffect(() => {
     if (auth.loading) return;
@@ -169,7 +248,9 @@ export default function RoomClient({ code }: RoomClientProps) {
         void channel.track({
           client_id: presenceClientId.current,
           user_id: auth.session?.user.id ?? null,
-          label: auth.session?.user.email ?? "Guest device",
+          device_id: deviceProfile?.id ?? null,
+          label: deviceProfile?.name ?? auth.session?.user.email ?? "Guest device",
+          color: deviceProfile?.color ?? "#34d399",
           online_at: new Date().toISOString(),
           last_seen_message_id: latestMessageId,
         } satisfies PresencePayload);
@@ -180,7 +261,7 @@ export default function RoomClient({ code }: RoomClientProps) {
       setPresences([]);
       void realtimeClient.removeChannel(channel);
     };
-  }, [code, room?.id, room?.storage_mode, roomPassword, auth.session?.user.id, auth.session?.access_token]);
+  }, [code, room?.id, room?.storage_mode, roomPassword, auth.session?.user.id, auth.session?.access_token, deviceProfile?.id, deviceProfile?.name, deviceProfile?.color]);
 
   useEffect(() => {
     const channel = presenceChannelRef.current;
@@ -188,11 +269,30 @@ export default function RoomClient({ code }: RoomClientProps) {
     void channel.track({
       client_id: presenceClientId.current,
       user_id: auth.session?.user.id ?? null,
-      label: auth.session?.user.email ?? "Guest device",
+      device_id: deviceProfile?.id ?? null,
+      label: deviceProfile?.name ?? auth.session?.user.email ?? "Guest device",
+      color: deviceProfile?.color ?? "#34d399",
       online_at: new Date().toISOString(),
       last_seen_message_id: latestMessageId,
     } satisfies PresencePayload);
-  }, [latestMessageId, auth.session?.user.id]);
+  }, [latestMessageId, auth.session?.user.id, deviceProfile?.id, deviceProfile?.name, deviceProfile?.color]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      if (event.key === "/" && !isTyping) {
+        event.preventDefault();
+        document.getElementById("room-search")?.focus();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "u") {
+        event.preventDefault();
+        fileInputRef.current?.click();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -225,11 +325,55 @@ export default function RoomClient({ code }: RoomClientProps) {
     return () => window.removeEventListener("paste", handlePaste);
   }, [room, uploading]);
 
+  useEffect(() => {
+    if (!room || !canSend || sharedPayloadHandledRef.current) return;
+    sharedPayloadHandledRef.current = true;
+
+    void getPendingShare().then(async (payload) => {
+      if (!payload || payload.targetRoomCode !== code) return;
+      const sharedText = getSharedText(payload);
+      const textSent = sharedText ? await sendTextValue(sharedText, false) : true;
+      const filesSent = payload.files.length > 0 ? await uploadSelectedFiles(payload.files) : true;
+      if (textSent && filesSent) {
+        await clearPendingShare();
+        setNotice("Shared item sent to this room.");
+      } else {
+        setNotice("Part of the shared item could not be sent. Reload this room to retry.");
+      }
+    }).catch(() => setNotice("The shared item could not be opened."));
+  }, [room?.id, canSend, code]);
+
   function getRoomHeaders(password = roomPassword) {
-    const headers: HeadersInit = {};
+    const headers: Record<string, string> = { ...getDeviceHeaders(deviceProfile) };
     if (password) headers["x-room-password"] = password;
     if (auth.session) headers.Authorization = `Bearer ${auth.session.access_token}`;
     return headers;
+  }
+
+  function saveCurrentDevice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = deviceNameInput.trim();
+    if (!name) return;
+    const profile = deviceProfile
+      ? { ...deviceProfile, name: name.slice(0, 32) }
+      : createDeviceProfile(name);
+    saveDeviceProfile(profile);
+    setDeviceProfile(profile);
+    setDeviceNameInput(profile.name);
+    setIsDeviceDialogOpen(false);
+    setNotice(`This device is now ${profile.name}.`);
+  }
+
+  function toggleDefaultRoom() {
+    if (isDefaultRoom) {
+      setDefaultRoomCode("");
+      setIsDefaultRoom(false);
+      setNotice("Default quick-send room removed.");
+      return;
+    }
+    setDefaultRoomCode(code);
+    setIsDefaultRoom(true);
+    setNotice(`${code} is now your default quick-send room.`);
   }
 
   function broadcastRefresh() {
@@ -339,12 +483,9 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const clean = text.trim();
-    if (!clean || !canWrite) return;
-
-    setText("");
+  async function sendTextValue(value: string, restoreOnFailure: boolean) {
+    const clean = value.trim();
+    if (!clean || !canSend) return false;
     const response = await fetch(`/api/rooms/${code}/messages`, {
       method: "POST",
       headers: {
@@ -357,17 +498,26 @@ export default function RoomClient({ code }: RoomClientProps) {
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       setNotice(payload.error ?? "Unable to send message.");
-      setText(clean);
-      return;
+      if (restoreOnFailure) setText(clean);
+      return false;
     }
 
     const message = (await response.json()) as BridgeMessage;
     setMessages((current) => upsertById(current, message));
     broadcastRefresh();
+    return true;
+  }
+
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const clean = text.trim();
+    if (!clean || !canSend) return;
+    setText("");
+    await sendTextValue(clean, true);
   }
 
   async function uploadSelectedFiles(uploads: File[]) {
-    if (!canWrite || uploads.length === 0) return;
+    if (!canSend || uploads.length === 0) return false;
 
     setUploading(true);
     setNotice("");
@@ -400,6 +550,7 @@ export default function RoomClient({ code }: RoomClientProps) {
 
       setNotice(errors.length > 0 ? `${uploads.length - errors.length}/${uploads.length} files uploaded. ${errors.join(" ")}` : `${uploads.length} file${uploads.length > 1 ? "s" : ""} uploaded.`);
       if (uploads.length > errors.length) broadcastRefresh();
+      return errors.length === 0;
     } finally {
       setUploading(false);
       setUploadProgress("");
@@ -414,13 +565,13 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   function handleDragEnter(event: DragEvent<HTMLElement>) {
     event.preventDefault();
-    if (!canWrite || uploading) return;
+    if (!canSend || uploading) return;
     setIsDraggingFile(true);
   }
 
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
-    if (!canWrite || uploading) return;
+    if (!canSend || uploading) return;
     event.dataTransfer.dropEffect = "copy";
     setIsDraggingFile(true);
   }
@@ -435,7 +586,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   async function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     setIsDraggingFile(false);
-    if (!canWrite || uploading) return;
+    if (!canSend || uploading) return;
 
     const uploads = Array.from(event.dataTransfer.files ?? []);
     await uploadSelectedFiles(uploads);
@@ -653,7 +804,30 @@ export default function RoomClient({ code }: RoomClientProps) {
     <main className="relative isolate min-h-screen overflow-hidden px-3 py-3 font-mono sm:px-5 lg:px-6">
       <GridBackground size={32} />
       <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[24rem_minmax(0,1fr)]">
-        <aside className="rounded-xl border border-th-border/70 bg-th-card/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]">
+        <div className="flex items-center justify-between rounded-xl border border-th-border/70 bg-th-card/70 p-3 shadow-sm backdrop-blur-md lg:hidden">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-th-text-faint">Room</p>
+            <p className="font-bold tracking-[0.18em] text-th-text">{code}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-th-border/70 px-2.5 py-1 text-xs text-th-text-muted">
+              {unreadCount > 0 ? `${unreadCount} new` : status === "online" ? `${presences.length || 1} online` : status}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsDetailsOpen((open) => !open)}
+              className="grid size-10 place-items-center rounded-lg border border-th-border/70 text-th-text-sub"
+              aria-label="Toggle room details"
+            >
+              {isDetailsOpen ? <X className="size-4" /> : <Settings2 className="size-4" />}
+            </button>
+          </div>
+        </div>
+
+        <aside className={cn(
+          "rounded-xl border border-th-border/70 bg-th-card/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:block lg:h-[calc(100vh-1.5rem)]",
+          isDetailsOpen ? "block" : "hidden",
+        )}>
           <div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-medium text-th-text-muted">Room Code</p>
@@ -675,6 +849,33 @@ export default function RoomClient({ code }: RoomClientProps) {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Stat label="Messages" value={messages.filter((message) => !message.deleted_at).length} />
             <Stat label="Files" value={files.filter((file) => !file.deleted_at).length} />
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDeviceNameInput(deviceProfile?.name ?? "");
+                setIsDeviceDialogOpen(true);
+              }}
+              className="flex items-center justify-center gap-2 rounded-lg border border-th-border/70 px-3 py-2 text-xs font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40"
+            >
+              <Smartphone className="size-4" />
+              {deviceProfile?.name ?? "Name device"}
+            </button>
+            <button
+              type="button"
+              onClick={toggleDefaultRoom}
+              className={cn(
+                "flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition",
+                isDefaultRoom
+                  ? "border-th-accent/60 bg-th-accent-soft/15 text-th-accent-text"
+                  : "border-th-border/70 text-th-text-sub hover:border-th-border-strong hover:bg-th-elevated/40",
+              )}
+            >
+              <Star className={cn("size-4", isDefaultRoom && "fill-current")} />
+              {isDefaultRoom ? "Quick-send room" : "Set default"}
+            </button>
           </div>
 
           <div className="mt-4 rounded-lg border border-th-border/70 bg-th-inner/30 p-3 backdrop-blur-sm">
@@ -841,14 +1042,21 @@ export default function RoomClient({ code }: RoomClientProps) {
           <div className="border-b border-th-border-subtle/80 p-3 sm:p-4">
             <form onSubmit={sendMessage} className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <textarea
+                ref={textareaRef}
                 value={text}
                 onChange={(event) => setText(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
                 placeholder="Paste text, link, code, email, phone number..."
                 className="min-h-24 resize-none rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-th-text-sub outline-none backdrop-blur-sm transition placeholder:text-th-text-faint focus:border-th-border-strong focus:ring-4 focus:ring-th-border-strong/20"
               />
               <div className="grid grid-cols-2 gap-2 sm:w-14 sm:grid-cols-1">
                 <button
-                  disabled={!text.trim() || !canWrite}
+                  disabled={!text.trim() || !canSend}
                   className="grid h-12 place-items-center rounded-lg border border-th-border bg-th-card/60 text-th-text transition hover:border-th-border-strong hover:bg-th-elevated/60 disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Send message"
                 >
@@ -857,7 +1065,7 @@ export default function RoomClient({ code }: RoomClientProps) {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={!canWrite || uploading}
+                  disabled={!canSend || uploading}
                   className="grid h-12 place-items-center rounded-lg border border-th-border/70 bg-th-card/30 text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/40 hover:text-th-text disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                   aria-label="Upload file"
                 >
@@ -897,10 +1105,20 @@ export default function RoomClient({ code }: RoomClientProps) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-4">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+            {unreadCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })}
+                className="mb-3 flex w-full items-center justify-center rounded-lg border border-th-accent/40 bg-th-accent-soft/10 px-3 py-2 text-sm font-semibold text-th-accent-text"
+              >
+                {unreadCount} new item{unreadCount === 1 ? "" : "s"} · Jump to latest
+              </button>
+            ) : null}
+            <div className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <label className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-th-text-faint" />
                 <input
+                  id="room-search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search messages and files"
@@ -917,6 +1135,19 @@ export default function RoomClient({ code }: RoomClientProps) {
                 <option value="files">Files</option>
                 <option value="pinned">Pinned</option>
                 <option value="links">Links</option>
+              </select>
+              <select
+                value={senderFilter}
+                onChange={(event) => setSenderFilter(event.target.value)}
+                className="rounded-lg border border-th-border/70 bg-th-card px-3 py-2.5 text-sm text-th-text-sub outline-none focus:border-th-border-strong"
+                aria-label="Filter by sender"
+              >
+                <option value="all">All senders</option>
+                {senderOptions.map(([deviceId, sender]) => (
+                  <option key={deviceId} value={deviceId}>
+                    {deviceId === deviceProfile?.id ? `${sender.name} (You)` : sender.name}
+                  </option>
+                ))}
               </select>
             </div>
             {timeline.length === 0 ? (
@@ -940,6 +1171,8 @@ export default function RoomClient({ code }: RoomClientProps) {
                     <MessageCard
                       key={`message-${entry.item.id}`}
                       message={entry.item}
+                      currentDeviceId={deviceProfile?.id ?? null}
+                      roomOwnerId={room?.created_by ?? null}
                       writable={canWrite}
                       copied={copiedId === entry.item.id}
                       onCopy={() => copyMessage(entry.item)}
@@ -952,6 +1185,8 @@ export default function RoomClient({ code }: RoomClientProps) {
                     <FileCard
                       key={`file-${entry.item.id}`}
                       file={entry.item}
+                      currentDeviceId={deviceProfile?.id ?? null}
+                      roomOwnerId={room?.created_by ?? null}
                       writable={canWrite}
                       onDelete={() => deleteFile(entry.item.id)}
                       onNotice={setNotice}
@@ -964,6 +1199,15 @@ export default function RoomClient({ code }: RoomClientProps) {
           </div>
         </section>
       </div>
+      {isDeviceDialogOpen ? (
+        <DeviceProfileDialog
+          value={deviceNameInput}
+          hasExistingProfile={Boolean(deviceProfile)}
+          onChange={setDeviceNameInput}
+          onSubmit={saveCurrentDevice}
+          onClose={deviceProfile ? () => setIsDeviceDialogOpen(false) : undefined}
+        />
+      ) : null}
     </main>
   );
 }
@@ -979,6 +1223,8 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function MessageCard({
   message,
+  currentDeviceId,
+  roomOwnerId,
   writable,
   copied,
   onCopy,
@@ -988,6 +1234,8 @@ function MessageCard({
   onDelete,
 }: {
   message: BridgeMessage;
+  currentDeviceId: string | null;
+  roomOwnerId: string | null;
   writable: boolean;
   copied: boolean;
   onCopy: () => void;
@@ -1022,6 +1270,14 @@ function MessageCard({
         message.is_pinned ? "border-th-border-strong bg-th-inner/40" : "border-th-border/70 bg-th-inner/30",
       )}
     >
+      <SenderBadge
+        name={message.sender_name}
+        color={message.sender_color}
+        senderDeviceId={message.sender_device_id}
+        senderUserId={message.sender_user_id}
+        currentDeviceId={currentDeviceId}
+        roomOwnerId={roomOwnerId}
+      />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-th-text-muted">
           <span className="rounded-full bg-th-card/70 px-2 py-1 font-medium uppercase text-th-text-muted">{message.type}</span>
@@ -1075,11 +1331,15 @@ function MessageCard({
 
 function FileCard({
   file,
+  currentDeviceId,
+  roomOwnerId,
   writable,
   onDelete,
   onNotice,
 }: {
   file: BridgeFile;
+  currentDeviceId: string | null;
+  roomOwnerId: string | null;
   writable: boolean;
   onDelete: () => void;
   onNotice: (message: string) => void;
@@ -1116,6 +1376,14 @@ function FileCard({
 
   return (
     <article className="rounded-lg border border-th-border/70 bg-th-inner/30 p-3 shadow-sm transition backdrop-blur-sm">
+      <SenderBadge
+        name={file.sender_name}
+        color={file.sender_color}
+        senderDeviceId={file.sender_device_id}
+        senderUserId={file.sender_user_id}
+        currentDeviceId={currentDeviceId}
+        roomOwnerId={roomOwnerId}
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-th-border/70 bg-th-card/60 text-th-text-sub">
@@ -1148,6 +1416,96 @@ function FileCard({
       </div>
       <FilePreview file={file} />
     </article>
+  );
+}
+
+function SenderBadge({
+  name,
+  color,
+  senderDeviceId,
+  senderUserId,
+  currentDeviceId,
+  roomOwnerId,
+}: {
+  name: string | null;
+  color: string | null;
+  senderDeviceId: string | null;
+  senderUserId: string | null;
+  currentDeviceId: string | null;
+  roomOwnerId: string | null;
+}) {
+  const isYou = Boolean(senderDeviceId && currentDeviceId && senderDeviceId === currentDeviceId);
+  const isOwner = Boolean(senderUserId && roomOwnerId && senderUserId === roomOwnerId);
+  const isVerified = Boolean(senderUserId);
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+      <span
+        className="grid size-7 place-items-center rounded-full border border-white/10 font-bold text-slate-950"
+        style={{ backgroundColor: color ?? "#a3a3a3" }}
+        aria-hidden="true"
+      >
+        {(name?.trim().charAt(0) || "?").toUpperCase()}
+      </span>
+      <span className="font-semibold text-th-text-sub">{name || "Unknown device"}</span>
+      {isYou ? <span className="rounded-full bg-th-accent-soft/15 px-2 py-0.5 text-th-accent-text">You</span> : null}
+      {isOwner ? <span className="rounded-full border border-amber-400/30 px-2 py-0.5 text-amber-300">Owner</span> : null}
+      {!isOwner && isVerified ? <span className="rounded-full border border-sky-400/25 px-2 py-0.5 text-sky-300">Verified</span> : null}
+      {!isVerified ? <span className="rounded-full border border-th-border/70 px-2 py-0.5 text-th-text-muted">Guest</span> : null}
+    </div>
+  );
+}
+
+function DeviceProfileDialog({
+  value,
+  hasExistingProfile,
+  onChange,
+  onSubmit,
+  onClose,
+}: {
+  value: string;
+  hasExistingProfile: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-th-overlay/80 px-4 py-6 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="device-profile-title">
+      <form onSubmit={onSubmit} className="w-full max-w-md rounded-xl border border-th-border/70 bg-th-card/95 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="grid size-12 place-items-center rounded-xl border border-th-accent/40 bg-th-accent-soft/10 text-th-accent-text">
+            <Smartphone className="size-6" />
+          </div>
+          {onClose ? (
+            <button type="button" onClick={onClose} className="grid size-9 place-items-center rounded-lg border border-th-border/70 text-th-text-muted" aria-label="Close device profile">
+              <X className="size-4" />
+            </button>
+          ) : null}
+        </div>
+        <h2 id="device-profile-title" className="mt-4 text-xl font-bold text-th-text">
+          {hasExistingProfile ? "Rename this device" : "What should we call this device?"}
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-th-text-muted">
+          This name appears beside messages and files so everyone in the room knows where they came from.
+        </p>
+        <label className="mt-4 block text-sm font-semibold text-th-text-sub" htmlFor="device-name">Device name</label>
+        <input
+          id="device-name"
+          value={value}
+          onChange={(event) => onChange(event.target.value.slice(0, 32))}
+          placeholder="e.g. Tanak's iPhone"
+          autoFocus
+          className="mt-2 w-full rounded-lg border border-th-border/70 bg-th-inner/30 px-4 py-3 text-th-text outline-none focus:border-th-border-strong"
+        />
+        <div className="mt-4 flex items-center justify-between gap-3 text-xs text-th-text-faint">
+          <span>Saved only on this device</span>
+          <span>{value.length}/32</span>
+        </div>
+        <button disabled={!value.trim()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-th-accent/60 bg-th-accent-soft/15 px-4 py-3 font-semibold text-th-text disabled:opacity-50">
+          <Check className="size-4" /> Save device name
+        </button>
+      </form>
+    </div>
   );
 }
 

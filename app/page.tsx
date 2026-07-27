@@ -15,6 +15,7 @@ import {
   Trash2,
   Unlock,
   X,
+  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, FormEvent, useEffect, useState } from "react";
@@ -24,6 +25,8 @@ import { cn, generateRoomCode } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuthSession } from "@/lib/use-auth";
 import type { RoomView } from "@/lib/types";
+import { PwaInstallButton } from "@/components/pwa-install-button";
+import { getDefaultRoomCode } from "@/lib/device-profile";
 
 const expiryOptions = [
   { label: "10 min", value: 10 },
@@ -48,6 +51,11 @@ export default function HomePage() {
   const [myRooms, setMyRooms] = useState<RoomView[]>([]);
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const [savedRoomsError, setSavedRoomsError] = useState("");
+  const [defaultRoomCode, setDefaultRoomCode] = useState("");
+
+  useEffect(() => {
+    setDefaultRoomCode(getDefaultRoomCode());
+  }, []);
 
   useEffect(() => {
     if (!auth.session) {
@@ -159,13 +167,31 @@ export default function HomePage() {
       <div className="mx-auto grid w-full max-w-6xl gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="mx-auto flex w-full max-w-xl flex-col justify-center xl:max-w-none">
           <header className="mb-7 text-center">
-            <div className="flex items-center justify-end gap-2"><AuthButton /><ThemeToggle /></div>
+            <div className="flex items-center justify-end gap-2"><PwaInstallButton /><AuthButton /><ThemeToggle /></div>
             <TextBridgeMark />
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-th-text sm:text-5xl">TextBridge</h1>
             <p className="mt-2 text-sm text-th-text-muted">Send text and files between your devices instantly.</p>
           </header>
 
           <section className="rounded-xl border border-th-border/70 bg-th-card/55 p-5 shadow-soft backdrop-blur-md">
+            {defaultRoomCode ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/room/${defaultRoomCode}`)}
+                className="mb-4 flex w-full items-center justify-between gap-3 rounded-lg border border-th-accent/50 bg-th-accent-soft/10 px-4 py-3 text-left transition hover:border-th-accent hover:bg-th-accent-soft/20"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="grid size-10 place-items-center rounded-lg bg-th-accent-soft/15 text-th-accent-text">
+                    <Zap className="size-5" />
+                  </span>
+                  <span>
+                    <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-th-accent-text">Quick send</span>
+                    <span className="mt-1 block text-sm font-semibold text-th-text">Open {defaultRoomCode}</span>
+                  </span>
+                </span>
+                <ArrowRight className="size-4 text-th-accent-text" />
+              </button>
+            ) : null}
             <div className="mb-4 rounded-lg border border-th-border/70 bg-th-inner/30 p-4 backdrop-blur-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>

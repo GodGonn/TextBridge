@@ -22,7 +22,11 @@ create table if not exists public.messages (
   is_pinned boolean not null default false,
   created_at timestamptz not null default now(),
   expired_at timestamptz,
-  deleted_at timestamptz
+  deleted_at timestamptz,
+  sender_user_id uuid,
+  sender_device_id uuid,
+  sender_name text,
+  sender_color text
 );
 
 create table if not exists public.files (
@@ -34,8 +38,21 @@ create table if not exists public.files (
   file_size bigint not null,
   created_at timestamptz not null default now(),
   expired_at timestamptz,
-  deleted_at timestamptz
+  deleted_at timestamptz,
+  sender_user_id uuid,
+  sender_device_id uuid,
+  sender_name text,
+  sender_color text
 );
+
+alter table public.messages add column if not exists sender_user_id uuid;
+alter table public.messages add column if not exists sender_device_id uuid;
+alter table public.messages add column if not exists sender_name text;
+alter table public.messages add column if not exists sender_color text;
+alter table public.files add column if not exists sender_user_id uuid;
+alter table public.files add column if not exists sender_device_id uuid;
+alter table public.files add column if not exists sender_name text;
+alter table public.files add column if not exists sender_color text;
 
 create table if not exists public.users (
   id uuid primary key,
@@ -56,9 +73,9 @@ create table if not exists public.room_members (
 create unique index if not exists room_members_room_user_unique_idx on public.room_members (room_id, user_id);
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('textbridge-files', 'textbridge-files', true, 104857600, null)
+values ('textbridge-files', 'textbridge-files', false, 104857600, null)
 on conflict (id) do update
-set public = true,
+set public = false,
     file_size_limit = 104857600,
     allowed_mime_types = null;
 
@@ -109,38 +126,17 @@ drop policy if exists "textbridge storage compatibility insert" on storage.objec
 drop policy if exists "textbridge storage compatibility update" on storage.objects;
 drop policy if exists "textbridge storage compatibility delete" on storage.objects;
 
--- Compatibility mode keeps account-free rooms working when no server secret is configured.
--- Production deployments should set SUPABASE_SECRET_KEY and replace these with deny-all policies.
-create policy "rooms compatibility access" on public.rooms
-  for all to anon, authenticated using (true) with check (true);
-
-create policy "messages compatibility access" on public.messages
-  for all to anon, authenticated using (true) with check (true);
-
-create policy "files compatibility access" on public.files
-  for all to anon, authenticated using (true) with check (true);
-
-create policy "textbridge storage compatibility insert" on storage.objects
-  for insert to anon, authenticated with check (bucket_id = 'textbridge-files');
-
-create policy "textbridge storage compatibility update" on storage.objects
-  for update to anon, authenticated using (bucket_id = 'textbridge-files') with check (bucket_id = 'textbridge-files');
-
-create policy "textbridge storage compatibility delete" on storage.objects
-  for delete to anon, authenticated using (bucket_id = 'textbridge-files');
-
 revoke all on table public.rooms from anon, authenticated;
 revoke all on table public.messages from anon, authenticated;
 revoke all on table public.files from anon, authenticated;
-grant all on table public.rooms to anon, authenticated;
-grant all on table public.messages to anon, authenticated;
-grant all on table public.files to anon, authenticated;
-grant select, insert, update on table public.users to authenticated;
-grant select, insert, update, delete on table public.room_members to authenticated;
+revoke all on table public.users from anon, authenticated;
+revoke all on table public.room_members from anon, authenticated;
 
 create index if not exists rooms_created_by_idx on public.rooms (created_by);
 create index if not exists messages_room_id_idx on public.messages (room_id);
 create index if not exists files_room_id_idx on public.files (room_id);
+create index if not exists messages_room_sender_device_idx on public.messages (room_id, sender_device_id);
+create index if not exists files_room_sender_device_idx on public.files (room_id, sender_device_id);
 create index if not exists room_members_room_id_idx on public.room_members (room_id);
 create index if not exists room_members_user_id_idx on public.room_members (user_id);
 

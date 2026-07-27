@@ -1,7 +1,7 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { localStore } from "@/lib/local-store";
-import type { BridgeFile, BridgeMessage, Room, RoomView } from "@/lib/types";
+import type { BridgeFile, BridgeMessage, Room, RoomView, SenderIdentity } from "@/lib/types";
 import { detectMessageType, generateRoomCode } from "@/lib/utils";
 
 type StorageMode = "supabase" | "local";
@@ -28,7 +28,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabaseServerKey = supabaseSecretKey || supabaseServiceRoleKey || supabaseAnonKey;
+const supabaseServerKey = supabaseSecretKey || supabaseServiceRoleKey;
 
 const serverSupabase =
   supabaseUrl && supabaseServerKey
@@ -42,7 +42,9 @@ function normalizeCode(code: string) {
 }
 
 function hashPassword(password: string) {
-  return createHash("sha256").update(password).digest("hex");
+  const salt = randomBytes(16).toString("hex");
+  const digest = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${digest}`;
 }
 
 function isExpired(value: string | null | undefined) {
@@ -74,9 +76,16 @@ function passwordsMatch(storedHash: string | null, password?: string | null) {
   if (!storedHash) return true;
   if (!password) return false;
 
-  const incomingHash = Buffer.from(hashPassword(password));
-  const savedHash = Buffer.from(storedHash);
+  const [algorithm, salt, encodedDigest] = storedHash.split("$");
+  if (algorithm === "scrypt" && salt && encodedDigest) {
+    const incomingHash = scryptSync(password, salt, 64);
+    const savedHash = Buffer.from(encodedDigest, "hex");
+    return incomingHash.length === savedHash.length && timingSafeEqual(incomingHash, savedHash);
+  }
 
+  // Backward compatibility for rooms created before scrypt password hashing.
+  const incomingHash = Buffer.from(createHash("sha256").update(password).digest("hex"));
+  const savedHash = Buffer.from(storedHash);
   return incomingHash.length === savedHash.length && timingSafeEqual(incomingHash, savedHash);
 }
 
@@ -88,6 +97,32 @@ function filterActiveFiles(files: BridgeFile[]) {
   return files.filter((file) => !file.deleted_at && !isExpired(file.expired_at));
 }
 
+function getStoragePath(value: string) {
+  if (!value.startsWith("http://") && !value.startsWith("https://") && !value.startsWith("data:")) return value;
+  const markers = [
+    "/storage/v1/object/public/textbridge-files/",
+    "/storage/v1/object/sign/textbridge-files/",
+  ];
+  for (const marker of markers) {
+    const index = value.indexOf(marker);
+    if (index >= 0) return decodeURIComponent(value.slice(index + marker.length).split("?")[0]);
+  }
+  return null;
+}
+
+async function withSignedFileUrls(files: BridgeFile[]) {
+  if (!serverSupabase) return files;
+  return Promise.all(files.map(async (file) => {
+    const storagePath = getStoragePath(file.file_url);
+    if (!storagePath) return file;
+    const { data, error } = await serverSupabase.storage
+      .from("textbridge-files")
+      .createSignedUrl(storagePath, 60 * 60);
+    if (error || !data) throw error ?? new Error("Could not create a private file URL");
+    return { ...file, file_url: data.signedUrl };
+  }));
+}
+
 async function findSupabaseRoom(code: string) {
   if (!serverSupabase) return null;
   const { data, error } = await serverSupabase.from("rooms").select("*").eq("code", code).maybeSingle();
@@ -95,25 +130,16 @@ async function findSupabaseRoom(code: string) {
   return data as Room | null;
 }
 
-function createUserSupabase(accessToken: string) {
-  if (!supabaseUrl || !supabaseAnonKey) return null;
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
+async function ensureSavedRoom(userId: string, room: Room) {
+  if (!serverSupabase || room.expired_at) return;
 
-async function ensureSavedRoom(userId: string, room: Room, accessToken: string) {
-  const userSupabase = createUserSupabase(accessToken);
-  if (!userSupabase || room.expired_at) return;
-
-  const { error: userError } = await userSupabase.from("users").upsert(
+  const { error: userError } = await serverSupabase.from("users").upsert(
     { id: userId },
     { onConflict: "id", ignoreDuplicates: false },
   );
   if (userError) throw userError;
 
-  const { error: memberError } = await userSupabase.from("room_members").upsert(
+  const { error: memberError } = await serverSupabase.from("room_members").upsert(
     { room_id: room.id, user_id: userId, role: room.created_by === userId ? "owner" : "member" },
     { onConflict: "room_id,user_id", ignoreDuplicates: false },
   );
@@ -160,7 +186,7 @@ export async function createRoom(input: RoomCreateInput) {
         return { ok: false as const, status: 500, error: error?.message ?? "Could not create Supabase room" };
       }
       if (input.createdBy && input.accessToken && !expiredAt) {
-        await ensureSavedRoom(input.createdBy, data as Room, input.accessToken);
+        await ensureSavedRoom(input.createdBy, data as Room);
       }
       return { ok: true as const, room: toRoomView(data as Room, "supabase", input.createdBy) };
     }
@@ -241,7 +267,7 @@ export async function getRoomView(
   const access = await getRoomAccess(code, password, actorUserId);
   if (!access.ok) return access;
   if (actorUserId && accessToken && access.storageMode === "supabase") {
-    await ensureSavedRoom(actorUserId, access.room, accessToken);
+    await ensureSavedRoom(actorUserId, access.room);
   }
   return { ok: true as const, room: toRoomView(access.room, access.storageMode, actorUserId) };
 }
@@ -272,7 +298,13 @@ function canWriteToRoom(room: Room, actorUserId?: string | null) {
   return !room.is_locked || Boolean(actorUserId && actorUserId === room.created_by);
 }
 
-export async function createRoomMessage(code: string, password: string | null | undefined, textInput: string, actorUserId?: string | null) {
+export async function createRoomMessage(
+  code: string,
+  password: string | null | undefined,
+  textInput: string,
+  actorUserId?: string | null,
+  sender?: SenderIdentity,
+) {
   const access = await getRoomAccess(code, password, actorUserId);
   if (!access.ok) return access;
   if (!canWriteToRoom(access.room, actorUserId)) {
@@ -293,6 +325,10 @@ export async function createRoomMessage(code: string, password: string | null | 
         type: detectMessageType(text),
         is_pinned: false,
         expired_at: access.room.expired_at,
+        sender_user_id: actorUserId ?? null,
+        sender_device_id: sender?.deviceId ?? null,
+        sender_name: sender?.name ?? (actorUserId ? "Signed-in device" : "Guest device"),
+        sender_color: sender?.color ?? "#34d399",
       })
       .select("*")
       .single();
@@ -313,6 +349,10 @@ export async function createRoomMessage(code: string, password: string | null | 
     created_at: new Date().toISOString(),
     expired_at: access.room.expired_at,
     deleted_at: null,
+    sender_user_id: actorUserId ?? null,
+    sender_device_id: sender?.deviceId ?? null,
+    sender_name: sender?.name ?? (actorUserId ? "Signed-in device" : "Guest device"),
+    sender_color: sender?.color ?? "#34d399",
   };
 
   const messages = localStore.messages.get(access.room.id) ?? [];
@@ -379,13 +419,24 @@ export async function getRoomFiles(code: string, password?: string | null, actor
       return { ok: false as const, status: 500, error: error.message };
     }
 
-    return { ok: true as const, items: filterActiveFiles((data ?? []) as BridgeFile[]) };
+    try {
+      const items = await withSignedFileUrls(filterActiveFiles((data ?? []) as BridgeFile[]));
+      return { ok: true as const, items };
+    } catch (caught) {
+      return { ok: false as const, status: 500, error: caught instanceof Error ? caught.message : "Could not sign file URLs" };
+    }
   }
 
   return { ok: true as const, items: filterActiveFiles(localStore.files.get(access.room.id) ?? []) };
 }
 
-export async function createRoomFile(code: string, password: string | null | undefined, upload: File, actorUserId?: string | null) {
+export async function createRoomFile(
+  code: string,
+  password: string | null | undefined,
+  upload: File,
+  actorUserId?: string | null,
+  sender?: SenderIdentity,
+) {
   const access = await getRoomAccess(code, password, actorUserId);
   if (!access.ok) return access;
   if (!canWriteToRoom(access.room, actorUserId)) {
@@ -403,25 +454,34 @@ export async function createRoomFile(code: string, password: string | null | und
       return { ok: false as const, status: 500, error: uploadError.message };
     }
 
-    const { data: publicData } = serverSupabase.storage.from("textbridge-files").getPublicUrl(storagePath);
     const { data, error } = await serverSupabase
       .from("files")
       .insert({
         room_id: access.room.id,
         file_name: upload.name,
-        file_url: publicData.publicUrl,
+        file_url: storagePath,
         file_type: upload.type || "application/octet-stream",
         file_size: upload.size,
         expired_at: access.room.expired_at,
+        sender_user_id: actorUserId ?? null,
+        sender_device_id: sender?.deviceId ?? null,
+        sender_name: sender?.name ?? (actorUserId ? "Signed-in device" : "Guest device"),
+        sender_color: sender?.color ?? "#34d399",
       })
       .select("*")
       .single();
 
     if (error || !data) {
+      await serverSupabase.storage.from("textbridge-files").remove([storagePath]);
       return { ok: false as const, status: 500, error: error?.message ?? "Upload failed" };
     }
 
-    return { ok: true as const, item: data as BridgeFile };
+    try {
+      const [item] = await withSignedFileUrls([data as BridgeFile]);
+      return { ok: true as const, item };
+    } catch (caught) {
+      return { ok: false as const, status: 500, error: caught instanceof Error ? caught.message : "Could not sign uploaded file" };
+    }
   }
 
   if (upload.size > 10 * 1024 * 1024) {
@@ -440,6 +500,10 @@ export async function createRoomFile(code: string, password: string | null | und
     created_at: new Date().toISOString(),
     expired_at: access.room.expired_at,
     deleted_at: null,
+    sender_user_id: actorUserId ?? null,
+    sender_device_id: sender?.deviceId ?? null,
+    sender_name: sender?.name ?? (actorUserId ? "Signed-in device" : "Guest device"),
+    sender_color: sender?.color ?? "#34d399",
   };
 
   const files = localStore.files.get(access.room.id) ?? [];
@@ -463,6 +527,21 @@ export async function updateRoomFile(
   }
 
   if (access.storageMode === "supabase" && serverSupabase) {
+    if (patch.deleted_at) {
+      const { data: existing, error: lookupError } = await serverSupabase
+        .from("files")
+        .select("file_url")
+        .eq("id", fileId)
+        .eq("room_id", access.room.id)
+        .maybeSingle();
+      if (lookupError) return { ok: false as const, status: 500, error: lookupError.message };
+      const storagePath = existing ? getStoragePath(existing.file_url) : null;
+      if (storagePath) {
+        const { error: storageError } = await serverSupabase.storage.from("textbridge-files").remove([storagePath]);
+        if (storageError) return { ok: false as const, status: 500, error: storageError.message };
+      }
+    }
+
     const { data, error } = await serverSupabase
       .from("files")
       .update(patch)
@@ -490,11 +569,10 @@ export async function updateRoomFile(
   return { ok: true as const, item: updated };
 }
 
-export async function getOwnedRooms(userId: string, accessToken: string) {
-  const userSupabase = createUserSupabase(accessToken);
-  if (!userSupabase) return { ok: true as const, items: [] as RoomView[] };
+export async function getOwnedRooms(userId: string, _accessToken: string) {
+  if (!serverSupabase) return { ok: true as const, items: [] as RoomView[] };
 
-  const { data: memberRows, error: memberError } = await userSupabase
+  const { data: memberRows, error: memberError } = await serverSupabase
     .from("room_members")
     .select("role, rooms(*)")
     .eq("user_id", userId)
@@ -517,13 +595,12 @@ export async function getOwnedRooms(userId: string, accessToken: string) {
   };
 }
 
-export async function removeSavedRoom(roomId: string, userId: string, accessToken: string) {
-  const userSupabase = createUserSupabase(accessToken);
-  if (!userSupabase) {
+export async function removeSavedRoom(roomId: string, userId: string, _accessToken: string) {
+  if (!serverSupabase) {
     return { ok: false as const, status: 503, error: "Saved rooms require Supabase" };
   }
 
-  const { data, error } = await userSupabase
+  const { data, error } = await serverSupabase
     .from("room_members")
     .delete()
     .eq("room_id", roomId)
@@ -560,10 +637,9 @@ export async function updateOwnedRoom(codeInput: string, userId: string, input: 
       .is("deleted_at", null);
     if (storedFilesError) return { ok: false as const, status: 500, error: storedFilesError.message };
 
-    const marker = "/storage/v1/object/public/textbridge-files/";
     const storagePaths = (storedFiles ?? []).flatMap(({ file_url }) => {
-      const markerIndex = file_url.indexOf(marker);
-      return markerIndex >= 0 ? [decodeURIComponent(file_url.slice(markerIndex + marker.length))] : [];
+      const path = getStoragePath(file_url);
+      return path ? [path] : [];
     });
     if (storagePaths.length > 0) {
       const { error: storageError } = await serverSupabase.storage.from("textbridge-files").remove(storagePaths);
@@ -602,4 +678,50 @@ export async function updateOwnedRoom(codeInput: string, userId: string, input: 
   const { data, error } = await serverSupabase.from("rooms").update(patch).eq("id", room.id).eq("created_by", userId).select("*").single();
   if (error || !data) return { ok: false as const, status: 500, error: error?.message ?? "Could not update room" };
   return { ok: true as const, room: toRoomView(data as Room, "supabase", userId) };
+}
+
+export async function cleanupExpiredRooms() {
+  const now = new Date().toISOString();
+
+  if (!serverSupabase) {
+    let removedRooms = 0;
+    for (const [code, room] of localStore.rooms.entries()) {
+      if (!isExpired(room.expired_at)) continue;
+      localStore.rooms.delete(code);
+      localStore.messages.delete(room.id);
+      localStore.files.delete(room.id);
+      removedRooms += 1;
+    }
+    return { ok: true as const, removedRooms, removedFiles: 0 };
+  }
+
+  const { data: rooms, error: roomLookupError } = await serverSupabase
+    .from("rooms")
+    .select("id")
+    .not("expired_at", "is", null)
+    .lte("expired_at", now);
+  if (roomLookupError) return { ok: false as const, status: 500, error: roomLookupError.message };
+
+  const roomIds = (rooms ?? []).map((room) => room.id);
+  if (roomIds.length === 0) return { ok: true as const, removedRooms: 0, removedFiles: 0 };
+
+  const { data: files, error: fileLookupError } = await serverSupabase
+    .from("files")
+    .select("file_url")
+    .in("room_id", roomIds);
+  if (fileLookupError) return { ok: false as const, status: 500, error: fileLookupError.message };
+
+  const storagePaths = (files ?? []).flatMap(({ file_url }) => {
+    const path = getStoragePath(file_url);
+    return path ? [path] : [];
+  });
+  for (let index = 0; index < storagePaths.length; index += 100) {
+    const { error } = await serverSupabase.storage.from("textbridge-files").remove(storagePaths.slice(index, index + 100));
+    if (error) return { ok: false as const, status: 500, error: error.message };
+  }
+
+  const { error: deleteError } = await serverSupabase.from("rooms").delete().in("id", roomIds);
+  if (deleteError) return { ok: false as const, status: 500, error: deleteError.message };
+
+  return { ok: true as const, removedRooms: roomIds.length, removedFiles: storagePaths.length };
 }
