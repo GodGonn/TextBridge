@@ -148,8 +148,9 @@ npm run dev
 - จำกัดสิทธิ์ตารางข้อมูลหลักไม่ให้ client อ่าน/เขียนโดยตรง
 - เพิ่ม indexes ที่ใช้ค้นหาห้อง ข้อความ ไฟล์ และสมาชิก
 - เพิ่ม `rooms`, `messages` และ `files` เข้า Supabase Realtime publication
+- สร้าง shared rate limiter สำหรับใช้ข้าม server instances
 
-ไฟล์ใน `supabase/migrations/` มีไว้สำหรับอัปเกรดฐานข้อมูลเดิม หากเป็นการติดตั้งใหม่ ให้ใช้ `supabase/schema.sql` ซึ่งรวมโครงสร้างล่าสุดแล้ว
+ไฟล์ใน `supabase/migrations/` มีไว้สำหรับอัปเกรดฐานข้อมูลเดิม หากติดตั้งใหม่ให้ใช้ `supabase/schema.sql`; หากมีฐานข้อมูลเดิม ให้รัน migration ล่าสุดใน `supabase/migrations/` ด้วย
 
 ### 3. ตั้งค่า Environment Variables
 
@@ -346,7 +347,7 @@ curl -X POST http://localhost:3000/api/rooms/MYROOM/messages \
 | ส่งข้อความ | 120 ครั้ง / IP + Room Code / 1 นาที |
 | อัปโหลดไฟล์ | 30 ครั้ง / IP + Room Code / 10 นาที |
 
-Rate limiter ปัจจุบันเก็บสถานะใน memory ของแต่ละ server instance หากต้องการบังคับ limit อย่างสม่ำเสมอในระบบหลาย instance ควรเปลี่ยนไปใช้ shared store เช่น Redis
+เมื่อกำหนด `SUPABASE_SECRET_KEY` หรือ `SUPABASE_SERVICE_ROLE_KEY` ระบบจะใช้ Supabase RPC เก็บ rate limit ร่วมกันระหว่าง server instances สำหรับฐานข้อมูลเดิม ให้รัน `supabase/migrations/20260926000000_shared_rate_limit.sql` ก่อน deploy หากไม่มี server key แอปจะใช้ in-memory limiter สำหรับ local development ซึ่งไม่แชร์ข้าม instances
 
 ## ฐานข้อมูลและ Storage
 
@@ -434,8 +435,8 @@ npm run build
 - Room Code ไม่ใช่ความลับ หากข้อมูลสำคัญควรสร้าง Private Room และใช้รหัสผ่านที่คาดเดายาก
 - รหัสผ่านห้องที่ผู้ใช้กรอกถูกเก็บใน `sessionStorage` ของ browser tab เพื่อเปิดห้องซ้ำใน session เดิม
 - ชื่ออุปกรณ์ สีประจำอุปกรณ์ default room และสถานะอ่านล่าสุดถูกเก็บใน `localStorage`
-- local mode และ rate limiter ใช้หน่วยความจำของ process จึงไม่คงอยู่หลัง restart และไม่แชร์ข้าม server instances
-- local mode จำกัดไฟล์ไม่เกิน 10 MB; Supabase bucket ตั้ง limit ไว้ 100 MB
+- local mode เก็บข้อมูลในหน่วยความจำของ process และ rate limiter จะใช้ in-memory fallback เมื่อไม่มี server key; ทั้งสองอย่างไม่แชร์ข้าม server instances
+- local mode จำกัดไฟล์ไม่เกิน 10 MB; Supabase Storage จำกัดไฟล์ไม่เกิน 100 MB
 - แอปไม่มี end-to-end encryption เนื้อหาถูกประมวลผลบน server และจัดเก็บใน backend ที่ตั้งค่าไว้
 - ฟีเจอร์ offline ของ PWA เป็นการ fallback หน้า application shell ไม่ได้รองรับการส่งข้อความแบบ offline queue เต็มรูปแบบ
 

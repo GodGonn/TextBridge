@@ -34,15 +34,28 @@ import {
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { GridBackground } from "@/components/grid-background";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SoundToggle } from "@/components/sound-toggle";
 import { ImagesBadge } from "@/components/ui/images-badge";
+import { FilePreview, isImageFile } from "@/components/room/file-preview";
 import { Terminal } from "@/components/ui/terminal";
 import { supabase } from "@/lib/supabase";
 import { useAuthSession } from "@/lib/use-auth";
+import { playSendSound, playReceiveSound, playCopySound, playConnectSound } from "@/lib/sound-effects";
+import {
+  ColorPreviewCard,
+  OtpPreviewCard,
+  EnhancedLinkPreviewCard,
+  detectCodeLanguage,
+  parseColor,
+  parseOtpCode,
+} from "@/components/room/smart-previews";
 import type { BridgeFile, BridgeMessage, DeviceProfile, RoomView } from "@/lib/types";
 import { cn, formatFileSize, formatTime } from "@/lib/utils";
+import { MAX_LOCAL_UPLOAD_BYTES, MAX_SUPABASE_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { clearPendingShare, getPendingShare, getSharedText } from "@/lib/share-target";
 import {
   createDeviceProfile,
@@ -57,7 +70,7 @@ type RoomClientProps = {
   code: string;
 };
 
-type Status = "connecting" | "online" | "local" | "error" | "expired" | "locked";
+type Status = "connecting" | "online" | "local" | "offline" | "error" | "expired" | "locked";
 type TimelineItem =
   | { kind: "message"; created_at: string; item: BridgeMessage }
   | { kind: "file"; created_at: string; item: BridgeFile };
@@ -71,6 +84,8 @@ type PresencePayload = {
   device_id: string | null;
   color: string;
 };
+
+type UploadProgress = { fileName: string; index: number; total: number; percent: number };
 
 const uploadBadgeImages = [
   "https://assets.aceternity.com/pro/agenforce-1.webp",
@@ -90,7 +105,7 @@ export default function RoomClient({ code }: RoomClientProps) {
   const [isRoomLinkCopied, setIsRoomLinkCopied] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [query, setQuery] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
@@ -114,6 +129,12 @@ export default function RoomClient({ code }: RoomClientProps) {
   const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
   const presenceClientId = useRef(crypto.randomUUID());
   const sharedPayloadHandledRef = useRef(false);
+  const uploadXhrRef = useRef<XMLHttpRequest | null>(null);
+  const uploadCancelledRef = useRef(false);
+  const prevMessageIdsRef = useRef<Set<string>>(new Set());
+  const prevFileIdsRef = useRef<Set<string>>(new Set());
+  const isInitialLoadRef = useRef(true);
+  const prevPresencesCountRef = useRef(0);
 
   const timeline = useMemo<TimelineItem[]>(() => {
     return [
@@ -239,6 +260,10 @@ export default function RoomClient({ code }: RoomClientProps) {
       })
       .on("presence", { event: "sync" }, () => {
         const nextPresences = Object.values(channel.presenceState()).flat() as unknown as PresencePayload[];
+        if (prevPresencesCountRef.current > 0 && nextPresences.length > prevPresencesCountRef.current) {
+          playConnectSound();
+        }
+        prevPresencesCountRef.current = nextPresences.length;
         setPresences(nextPresences);
       })
       .on("broadcast", { event: "refresh" }, () => void loadTimeline(roomPassword))
@@ -384,10 +409,17 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   async function loadRoom(password?: string) {
     setStatus("connecting");
-    const response = await fetch(`/api/rooms/${code}`, {
-      cache: "no-store",
-      headers: getRoomHeaders(password),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`/api/rooms/${code}`, {
+        cache: "no-store",
+        headers: getRoomHeaders(password),
+      });
+    } catch {
+      setStatus(navigator.onLine ? "error" : "offline");
+      setNotice("Could not reach the server. Check your connection and try again.");
+      return false;
+    }
 
     if (response.status === 401 || response.status === 403) {
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
@@ -430,15 +462,44 @@ export default function RoomClient({ code }: RoomClientProps) {
           : "Local mode active.",
     );
 
-    await loadTimeline(password ?? roomPassword, roomData);
+    try {
+      await loadTimeline(password ?? roomPassword, roomData);
+    } catch {
+      setStatus(navigator.onLine ? "error" : "offline");
+      setNotice("The room loaded, but its latest messages could not be reached.");
+    }
     return true;
   }
 
+  useEffect(() => {
+    const handleOffline = () => {
+      setStatus("offline");
+      setNotice("You are offline. TextBridge will reconnect when your connection returns.");
+    };
+    const handleOnline = () => void loadRoom(roomPassword);
+
+    if (!window.navigator.onLine) handleOffline();
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [code, roomPassword]);
+
   async function loadTimeline(password = roomPassword, roomData?: RoomView) {
-    const [messageResponse, fileResponse] = await Promise.all([
-      fetch(`/api/rooms/${code}/messages`, { cache: "no-store", headers: getRoomHeaders(password) }),
-      fetch(`/api/rooms/${code}/files`, { cache: "no-store", headers: getRoomHeaders(password) }),
-    ]);
+    let messageResponse: Response;
+    let fileResponse: Response;
+    try {
+      [messageResponse, fileResponse] = await Promise.all([
+        fetch(`/api/rooms/${code}/messages`, { cache: "no-store", headers: getRoomHeaders(password) }),
+        fetch(`/api/rooms/${code}/files`, { cache: "no-store", headers: getRoomHeaders(password) }),
+      ]);
+    } catch {
+      setStatus(navigator.onLine ? "error" : "offline");
+      setNotice("Could not refresh this room. Check your connection and try again.");
+      return;
+    }
 
     if (messageResponse.status === 410 || fileResponse.status === 410) {
       setStatus("expired");
@@ -458,8 +519,31 @@ export default function RoomClient({ code }: RoomClientProps) {
       return;
     }
 
-    if (messageResponse.ok) setMessages((await messageResponse.json()) as BridgeMessage[]);
-    if (fileResponse.ok) setFiles((await fileResponse.json()) as BridgeFile[]);
+    if (messageResponse.ok) {
+      const nextMessages = (await messageResponse.json()) as BridgeMessage[];
+      if (!isInitialLoadRef.current) {
+        const hasIncoming = nextMessages.some(
+          (m) => !prevMessageIdsRef.current.has(m.id) && m.sender_device_id !== deviceProfile?.id && !m.deleted_at,
+        );
+        if (hasIncoming) playReceiveSound();
+      }
+      prevMessageIdsRef.current = new Set(nextMessages.map((m) => m.id));
+      setMessages(nextMessages);
+    }
+
+    if (fileResponse.ok) {
+      const nextFiles = (await fileResponse.json()) as BridgeFile[];
+      if (!isInitialLoadRef.current) {
+        const hasIncoming = nextFiles.some(
+          (f) => !prevFileIdsRef.current.has(f.id) && f.sender_device_id !== deviceProfile?.id && !f.deleted_at,
+        );
+        if (hasIncoming) playReceiveSound();
+      }
+      prevFileIdsRef.current = new Set(nextFiles.map((f) => f.id));
+      setFiles(nextFiles);
+    }
+
+    isInitialLoadRef.current = false;
     if (roomData) setRoom(roomData);
   }
 
@@ -503,6 +587,8 @@ export default function RoomClient({ code }: RoomClientProps) {
     }
 
     const message = (await response.json()) as BridgeMessage;
+    playSendSound();
+    prevMessageIdsRef.current.add(message.id);
     setMessages((current) => upsertById(current, message));
     broadcastRefresh();
     return true;
@@ -519,43 +605,63 @@ export default function RoomClient({ code }: RoomClientProps) {
   async function uploadSelectedFiles(uploads: File[]) {
     if (!canSend || uploads.length === 0) return false;
 
+    uploadCancelledRef.current = false;
     setUploading(true);
     setNotice("");
     const errors: string[] = [];
+    let uploadedCount = 0;
+    const maxFileBytes = room?.storage_mode === "local" ? MAX_LOCAL_UPLOAD_BYTES : MAX_SUPABASE_UPLOAD_BYTES;
 
     try {
       for (const [index, upload] of uploads.entries()) {
-        setUploadProgress(`${index + 1}/${uploads.length}: ${upload.name}`);
+        if (uploadCancelledRef.current) break;
+        if (upload.size > maxFileBytes) {
+          errors.push(`${upload.name}: files in this room must be ${Math.round(maxFileBytes / (1024 * 1024))} MB or smaller.`);
+          continue;
+        }
+
+        setUploadProgress({ fileName: upload.name, index: index + 1, total: uploads.length, percent: 0 });
         const formData = new FormData();
         formData.append("file", upload);
 
         try {
-          const response = await fetch(`/api/rooms/${code}/files`, {
-            method: "POST",
-            headers: getRoomHeaders(),
-            body: formData,
-          });
-
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => ({}))) as { error?: string };
-            throw new Error(payload.error ?? "Upload failed.");
-          }
-
-          const file = (await response.json()) as BridgeFile;
+          const file = await uploadFileWithProgress(
+            `/api/rooms/${code}/files`,
+            formData,
+            getRoomHeaders(),
+            (percent) => setUploadProgress({ fileName: upload.name, index: index + 1, total: uploads.length, percent }),
+            uploadXhrRef,
+          );
           setFiles((current) => upsertById(current, file));
+          prevFileIdsRef.current.add(file.id);
+          playSendSound();
+          uploadedCount += 1;
         } catch (caught) {
+          if (uploadCancelledRef.current) break;
           errors.push(`${upload.name}: ${caught instanceof Error ? caught.message : "Upload failed."}`);
         }
       }
 
-      setNotice(errors.length > 0 ? `${uploads.length - errors.length}/${uploads.length} files uploaded. ${errors.join(" ")}` : `${uploads.length} file${uploads.length > 1 ? "s" : ""} uploaded.`);
-      if (uploads.length > errors.length) broadcastRefresh();
+      if (uploadCancelledRef.current) {
+        setNotice(`Upload canceled. ${uploadedCount} of ${uploads.length} files uploaded.`);
+      } else if (errors.length > 0) {
+        setNotice(`${uploadedCount} of ${uploads.length} files uploaded. ${errors.join(" ")}`);
+      } else {
+        setNotice(`${uploadedCount} file${uploadedCount === 1 ? "" : "s"} uploaded.`);
+      }
+      if (uploadedCount > 0) broadcastRefresh();
       return errors.length === 0;
     } finally {
+      uploadXhrRef.current = null;
       setUploading(false);
-      setUploadProgress("");
+      setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  function cancelUpload() {
+    uploadCancelledRef.current = true;
+    uploadXhrRef.current?.abort();
   }
 
   async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
@@ -594,8 +700,9 @@ export default function RoomClient({ code }: RoomClientProps) {
 
   async function copyMessage(message: BridgeMessage) {
     await navigator.clipboard.writeText(message.text);
+    playCopySound();
     setCopiedId(message.id);
-    window.setTimeout(() => setCopiedId(""), 1100);
+    window.setTimeout(() => setCopiedId(""), 1200);
   }
 
   async function copyRoomLink() {
@@ -603,6 +710,7 @@ export default function RoomClient({ code }: RoomClientProps) {
 
     try {
       await navigator.clipboard.writeText(roomUrl);
+      playCopySound();
       setIsRoomLinkCopied(true);
       window.setTimeout(() => setIsRoomLinkCopied(false), 1200);
     } catch {
@@ -803,6 +911,11 @@ export default function RoomClient({ code }: RoomClientProps) {
   return (
     <main className="relative isolate min-h-screen overflow-hidden px-3 py-3 font-mono sm:px-5 lg:px-6">
       <GridBackground size={32} />
+      {room?.storage_mode === "local" ? (
+        <div role="status" className="relative mx-auto mb-3 max-w-7xl rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-th-warning-text">
+          Temporary local mode: this room clears when the server restarts. Add the Supabase server key to enable persistent storage.
+        </div>
+      ) : null}
       <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-7xl gap-3 lg:grid-cols-[24rem_minmax(0,1fr)]">
         <div className="flex items-center justify-between rounded-xl border border-th-border/70 bg-th-card/70 p-3 shadow-sm backdrop-blur-md lg:hidden">
           <div>
@@ -810,8 +923,9 @@ export default function RoomClient({ code }: RoomClientProps) {
             <p className="font-bold tracking-[0.18em] text-th-text">{code}</p>
           </div>
           <div className="flex items-center gap-2">
+            <SoundToggle />
             <span className="rounded-full border border-th-border/70 px-2.5 py-1 text-xs text-th-text-muted">
-              {unreadCount > 0 ? `${unreadCount} new` : status === "online" ? `${presences.length || 1} online` : status}
+              {unreadCount > 0 ? `${unreadCount} new` : status === "online" ? `${presences.length || 1} online` : status === "offline" ? "Offline" : status}
             </span>
             <button
               type="button"
@@ -825,7 +939,8 @@ export default function RoomClient({ code }: RoomClientProps) {
         </div>
 
         <aside className={cn(
-          "rounded-xl border border-th-border/70 bg-th-card/55 p-4 shadow-sm backdrop-blur-md lg:sticky lg:top-3 lg:block lg:h-[calc(100vh-1.5rem)]",
+          "rounded-xl border border-th-border/70 bg-th-card/55 p-4 pb-6 shadow-sm backdrop-blur-md",
+          "lg:sticky lg:top-3 lg:block lg:h-[calc(100vh-1.5rem)] lg:overflow-y-auto lg:overflow-x-hidden sidebar-scroll",
           isDetailsOpen ? "block" : "hidden",
         )}>
           <div>
@@ -833,6 +948,7 @@ export default function RoomClient({ code }: RoomClientProps) {
               <p className="text-sm font-medium text-th-text-muted">Room Code</p>
               <div className="flex items-center gap-2">
                 <AuthButton compact />
+                <SoundToggle />
                 <ThemeToggle />
                 <Link
                   href="/"
@@ -948,7 +1064,7 @@ export default function RoomClient({ code }: RoomClientProps) {
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-block size-2 rounded-full bg-th-accent" />
-              <span>{status === "online" ? "Supabase live sync" : status === "local" ? "Local mode sync" : "Connecting..."}</span>
+              <span>{status === "online" ? "Supabase live sync" : status === "local" ? "Local mode sync" : status === "offline" ? "Offline · reconnecting" : "Connecting..."}</span>
             </div>
             <div className="flex items-center gap-2">
               <Users className="size-4 text-th-text-muted" />
@@ -993,7 +1109,7 @@ export default function RoomClient({ code }: RoomClientProps) {
               <Terminal
                 className="max-w-none min-w-0 px-0"
                 panelClassName="rounded-none border-0 shadow-none"
-                contentClassName="h-[20.5rem] overflow-x-hidden px-3 py-4"
+                contentClassName="h-48 overflow-x-hidden px-3 py-3"
                 username="TextBridge"
                 commands={[
                   "tb room",
@@ -1028,17 +1144,29 @@ export default function RoomClient({ code }: RoomClientProps) {
             isDraggingFile && "border-th-accent/70 bg-th-accent-soft/5 shadow-[0_0_0_1px_rgba(110,231,183,0.2)]",
           )}
         >
-          {isDraggingFile ? (
-            <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-th-overlay/65 backdrop-blur-sm">
-              <div className="rounded-2xl border border-th-accent/60 bg-th-card/90 px-8 py-6 text-center shadow-2xl">
-                <div className="mx-auto grid size-14 place-items-center rounded-xl border border-th-accent/40 bg-th-accent-soft/10 text-th-accent-text">
-                  <FileUp className="size-6" />
+          <AnimatePresence>
+            {isDraggingFile ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-th-overlay/75 px-6 backdrop-blur-md"
+              >
+                <div className="relative w-full max-w-sm rounded-2xl border-2 border-dashed border-th-accent bg-th-card/95 p-8 text-center shadow-[0_0_60px_rgba(52,211,153,0.25)]">
+                  <div className="mx-auto grid size-16 place-items-center rounded-2xl border border-th-accent/50 bg-th-accent-soft/15 text-th-accent-text shadow-[0_0_30px_rgba(52,211,153,0.35)] animate-bounce">
+                    <FileUp className="size-8" />
+                  </div>
+                  <p className="mt-5 text-xl font-bold tracking-tight text-th-text">Drop files to bridge</p>
+                  <p className="mt-1 text-sm text-th-text-muted">Sends immediately to every connected device</p>
+                  <div className="mt-4 flex items-center justify-center gap-2 text-xs font-mono text-th-accent-text">
+                    <span className="inline-block size-2 rounded-full bg-th-accent animate-ping" />
+                    <span>Ready to receive</span>
+                  </div>
                 </div>
-                <p className="mt-4 text-lg font-semibold text-th-text">Drop file to upload</p>
-                <p className="mt-1 text-sm text-th-text-muted">Images, PDFs, notes, and other files will be added to this room.</p>
-              </div>
-            </div>
-          ) : null}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
           <div className="border-b border-th-border-subtle/80 p-3 sm:p-4">
             <form onSubmit={sendMessage} className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <textarea
@@ -1099,7 +1227,18 @@ export default function RoomClient({ code }: RoomClientProps) {
               <span>Supports images, PDF, TXT, DOCX, ZIP, and most common file types.</span>
               <span className="text-th-accent-text/90">Tip: drag, select, or paste multiple files.</span>
             </div>
-            {uploadProgress ? <p className="mt-2 text-xs text-th-accent-text">Uploading {uploadProgress}</p> : null}
+            {uploadProgress ? (
+              <div className="mt-3 rounded-lg border border-th-border/70 bg-th-inner/30 p-3" role="status" aria-live="polite">
+                <div className="flex items-center justify-between gap-3 text-xs text-th-accent-text">
+                  <span className="min-w-0 truncate">Uploading {uploadProgress.index}/{uploadProgress.total}: {uploadProgress.fileName}</span>
+                  <span className="shrink-0">{uploadProgress.percent}%</span>
+                </div>
+                <progress className="mt-2 h-2 w-full accent-emerald-400" max={100} value={uploadProgress.percent} aria-label="Upload progress" />
+                <button type="button" onClick={cancelUpload} className="mt-2 text-xs font-semibold text-th-text-muted underline underline-offset-2 hover:text-th-text">
+                  Cancel upload
+                </button>
+              </div>
+            ) : null}
             {room?.is_locked && !room.is_owner ? <p className="mt-2 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-xs text-th-warning-text">The owner locked this room. You can still read and download existing items.</p> : null}
             {notice ? <p className="mt-3 rounded-lg bg-th-warning-bg/40 px-3 py-2 text-sm text-th-warning-text">{notice}</p> : null}
           </div>
@@ -1166,33 +1305,51 @@ export default function RoomClient({ code }: RoomClientProps) {
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredTimeline.map((entry) =>
-                  entry.kind === "message" ? (
-                    <MessageCard
-                      key={`message-${entry.item.id}`}
-                      message={entry.item}
-                      currentDeviceId={deviceProfile?.id ?? null}
-                      roomOwnerId={room?.created_by ?? null}
-                      writable={canWrite}
-                      copied={copiedId === entry.item.id}
-                      onCopy={() => copyMessage(entry.item)}
-                      onPin={() => updateMessage(entry.item.id, { is_pinned: !entry.item.is_pinned })}
-                      onEdit={(nextText) => updateMessage(entry.item.id, { text: nextText })}
-                      onResend={() => resendMessage(entry.item)}
-                      onDelete={() => deleteMessage(entry.item.id)}
-                    />
-                  ) : (
-                    <FileCard
-                      key={`file-${entry.item.id}`}
-                      file={entry.item}
-                      currentDeviceId={deviceProfile?.id ?? null}
-                      roomOwnerId={room?.created_by ?? null}
-                      writable={canWrite}
-                      onDelete={() => deleteFile(entry.item.id)}
-                      onNotice={setNotice}
-                    />
-                  ),
-                )}
+                <AnimatePresence initial={false}>
+                  {filteredTimeline.map((entry) =>
+                    entry.kind === "message" ? (
+                      <motion.div
+                        key={`message-${entry.item.id}`}
+                        layout="position"
+                        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+                        transition={{ type: "spring", stiffness: 360, damping: 26 }}
+                      >
+                        <MessageCard
+                          message={entry.item}
+                          currentDeviceId={deviceProfile?.id ?? null}
+                          roomOwnerId={room?.created_by ?? null}
+                          writable={canWrite}
+                          copied={copiedId === entry.item.id}
+                          onCopy={() => copyMessage(entry.item)}
+                          onPin={() => updateMessage(entry.item.id, { is_pinned: !entry.item.is_pinned })}
+                          onEdit={(nextText) => updateMessage(entry.item.id, { text: nextText })}
+                          onResend={() => resendMessage(entry.item)}
+                          onDelete={() => deleteMessage(entry.item.id)}
+                        />
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key={`file-${entry.item.id}`}
+                        layout="position"
+                        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+                        transition={{ type: "spring", stiffness: 360, damping: 26 }}
+                      >
+                        <FileCard
+                          file={entry.item}
+                          currentDeviceId={deviceProfile?.id ?? null}
+                          roomOwnerId={room?.created_by ?? null}
+                          writable={canWrite}
+                          onDelete={() => deleteFile(entry.item.id)}
+                          onNotice={setNotice}
+                        />
+                      </motion.div>
+                    ),
+                  )}
+                </AnimatePresence>
                 <div ref={endRef} />
               </div>
             )}
@@ -1263,11 +1420,19 @@ function MessageCard({
     setIsEditing(false);
   }
 
+  const isFresh = Boolean(
+    currentDeviceId &&
+    message.sender_device_id &&
+    message.sender_device_id !== currentDeviceId &&
+    Date.now() - new Date(message.created_at).getTime() < 3500,
+  );
+
   return (
     <article
       className={cn(
-        "rounded-lg border p-3 shadow-sm transition",
+        "relative rounded-lg border p-3 shadow-sm transition-all duration-300",
         message.is_pinned ? "border-th-border-strong bg-th-inner/40" : "border-th-border/70 bg-th-inner/30",
+        isFresh && "border-th-accent ring-2 ring-emerald-400/50 shadow-[0_0_24px_rgba(52,211,153,0.22)]",
       )}
     >
       <SenderBadge
@@ -1280,14 +1445,35 @@ function MessageCard({
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-th-text-muted">
-          <span className="rounded-full bg-th-card/70 px-2 py-1 font-medium uppercase text-th-text-muted">{message.type}</span>
+          {message.type === "code" ? (
+            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-th-accent-text">
+              {detectCodeLanguage(message.text)}
+            </span>
+          ) : (
+            <span className="rounded-full bg-th-card/70 px-2 py-1 font-medium uppercase text-th-text-muted">{message.type}</span>
+          )}
           <span>{formatTime(message.created_at)}</span>
           {message.is_pinned ? <span className="font-medium text-th-text-sub">Pinned</span> : null}
         </div>
         <div className="flex items-center gap-1">
-          <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy} tone={copied ? "success" : "info"}>
-            <Copy className="size-4" />
-          </IconButton>
+          <div className="relative">
+            <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy} tone={copied ? "success" : "info"}>
+              <Copy className="size-4" />
+            </IconButton>
+            <AnimatePresence>
+              {copied && (
+                <motion.span
+                  initial={{ opacity: 0, y: 2, scale: 0.7 }}
+                  animate={{ opacity: 1, y: -22, scale: 1 }}
+                  exit={{ opacity: 0, y: -28, scale: 0.8 }}
+                  transition={{ duration: 0.22 }}
+                  className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-slate-950 shadow-md shadow-emerald-500/30 z-30"
+                >
+                  Copied!
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
           <IconButton label="Resend" onClick={onResend} disabled={!writable}>
             <RotateCcw className="size-4" />
           </IconButton>
@@ -1350,6 +1536,7 @@ function FileCard({
     if (isDownloading) return;
 
     setIsDownloading(true);
+    playCopySound();
     onNotice("");
 
     try {
@@ -1374,8 +1561,21 @@ function FileCard({
     }
   }
 
+  const isFresh = Boolean(
+    currentDeviceId &&
+    file.sender_device_id &&
+    file.sender_device_id !== currentDeviceId &&
+    Date.now() - new Date(file.created_at).getTime() < 3500,
+  );
+
   return (
-    <article className="rounded-lg border border-th-border/70 bg-th-inner/30 p-3 shadow-sm transition backdrop-blur-sm">
+    <article
+      className={cn(
+        "relative rounded-lg border p-3 shadow-sm transition-all duration-300 backdrop-blur-sm",
+        "border-th-border/70 bg-th-inner/30",
+        isFresh && "border-th-accent ring-2 ring-emerald-400/50 shadow-[0_0_24px_rgba(52,211,153,0.22)]",
+      )}
+    >
       <SenderBadge
         name={file.sender_name}
         color={file.sender_color}
@@ -1417,6 +1617,57 @@ function FileCard({
       <FilePreview file={file} />
     </article>
   );
+}
+
+function uploadFileWithProgress(
+  url: string,
+  formData: FormData,
+  headers: Record<string, string>,
+  onProgress: (percent: number) => void,
+  xhrRef: { current: XMLHttpRequest | null },
+) {
+  return new Promise<BridgeFile>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhrRef.current = xhr;
+    xhr.open("POST", url);
+    xhr.responseType = "text";
+    xhr.timeout = 600_000;
+
+    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+      }
+    });
+    xhr.onload = () => {
+      xhrRef.current = null;
+      let payload: { error?: string } & Partial<BridgeFile> = {};
+      try {
+        payload = JSON.parse(xhr.responseText) as typeof payload;
+      } catch {
+        reject(new Error("The server returned an unreadable response."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(payload.error ?? "Upload failed."));
+        return;
+      }
+      resolve(payload as BridgeFile);
+    };
+    xhr.onerror = () => {
+      xhrRef.current = null;
+      reject(new Error("Network error while uploading."));
+    };
+    xhr.ontimeout = () => {
+      xhrRef.current = null;
+      reject(new Error("Upload timed out. Try again."));
+    };
+    xhr.onabort = () => {
+      xhrRef.current = null;
+      reject(new DOMException("Upload canceled", "AbortError"));
+    };
+    xhr.send(formData);
+  });
 }
 
 function SenderBadge({
@@ -1548,8 +1799,18 @@ function IconButton({
 }
 
 function MessagePreview({ message }: { message: BridgeMessage }) {
+  const colorVal = parseColor(message.text);
+  if (colorVal) {
+    return <ColorPreviewCard color={colorVal} />;
+  }
+
+  const otpVal = parseOtpCode(message.text);
+  if (otpVal) {
+    return <OtpPreviewCard code={otpVal} />;
+  }
+
   if (message.type === "link") {
-    return <LinkPreviewCard url={message.text} />;
+    return <EnhancedLinkPreviewCard url={message.text} />;
   }
 
   if (message.type === "email") {
@@ -1588,122 +1849,6 @@ function MessagePreview({ message }: { message: BridgeMessage }) {
   return null;
 }
 
-function LinkPreviewCard({ url }: { url: string }) {
-  const parsed = safeParseUrl(url);
-  if (!parsed) return null;
-
-  const domain = parsed.hostname.replace(/^www\./, "");
-  const title = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/";
-  const summary = [parsed.protocol.replace(":", "").toUpperCase(), domain].join(" • ");
-
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="mt-3 block rounded-lg border border-th-border/70 bg-th-card/40 p-3 transition hover:border-th-border-strong hover:bg-th-elevated/60"
-    >
-      <div className="flex items-start gap-3">
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-th-border bg-th-elevated text-th-text-sub">
-          <ExternalLink className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-th-text">{domain}</p>
-          <p className="mt-1 break-words text-sm text-th-text-muted">{decodeUrlPath(title)}</p>
-          <p className="mt-2 text-xs uppercase tracking-wide text-th-text-faint">{summary}</p>
-        </div>
-      </div>
-    </a>
-  );
-}
-
-function FilePreview({ file }: { file: BridgeFile }) {
-  const [open, setOpen] = useState(false);
-  const [textPreview, setTextPreview] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function openTextPreview() {
-    if (textPreview !== null || loading) {
-      setOpen((current) => !current);
-      return;
-    }
-
-    setOpen(true);
-    setLoading(true);
-    setPreviewError("");
-
-    try {
-      const response = await fetch(file.file_url);
-      if (!response.ok) throw new Error("Could not load preview.");
-
-      const raw = await response.text();
-      const trimmed = raw.length > 4000 ? `${raw.slice(0, 4000)}\n\n...preview truncated...` : raw;
-      setTextPreview(trimmed);
-    } catch (caught) {
-      setPreviewError(caught instanceof Error ? caught.message : "Could not load preview.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (isImageFile(file)) {
-    return (
-      <div className="mt-3 overflow-hidden rounded-lg border border-th-border/70 bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.12),_transparent_42%),linear-gradient(180deg,rgba(10,10,10,0.92),rgba(23,23,23,0.96))] p-2">
-        <div className="flex max-h-[32rem] min-h-44 items-center justify-center overflow-hidden rounded-md bg-th-overlay/35">
-          <img
-            src={file.file_url}
-            alt={file.file_name}
-            className="max-h-[30rem] w-full object-contain"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (isPdfFile(file)) {
-    return (
-      <details className="mt-3 rounded-lg border border-th-border/70 bg-th-card/30">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-medium text-th-text-sub">
-          <span>Preview PDF</span>
-          <ChevronDown className="size-4 text-th-text-muted" />
-        </summary>
-        <div className="border-t border-th-border-subtle p-2">
-          <iframe src={file.file_url} title={file.file_name} className="h-96 w-full rounded-md bg-white" />
-        </div>
-      </details>
-    );
-  }
-
-  if (isTextPreviewableFile(file)) {
-    return (
-      <div className="mt-3">
-        <button
-          type="button"
-          onClick={() => void openTextPreview()}
-          className="inline-flex items-center gap-2 rounded-md border border-th-border bg-th-card/50 px-3 py-2 text-xs font-medium text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/60 hover:text-th-text"
-        >
-          <ChevronDown className={cn("size-4 transition", open && "rotate-180")} />
-          {open ? "Hide preview" : "Preview text"}
-        </button>
-        {open ? (
-          <div className="mt-3 rounded-lg border border-th-border/70 bg-th-card/40 p-3">
-            {loading ? <p className="text-sm text-th-text-muted">Loading preview...</p> : null}
-            {previewError ? <p className="text-sm text-th-warning-text">{previewError}</p> : null}
-            {textPreview ? (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-th-text-sub">
-                {textPreview}
-              </pre>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  return null;
-}
-
 function safeParseUrl(value: string) {
   try {
     return new URL(value);
@@ -1718,28 +1863,6 @@ function decodeUrlPath(value: string) {
   } catch {
     return value;
   }
-}
-
-function isImageFile(file: BridgeFile) {
-  return file.file_type.startsWith("image/");
-}
-
-function isPdfFile(file: BridgeFile) {
-  return file.file_type === "application/pdf" || file.file_name.toLowerCase().endsWith(".pdf");
-}
-
-function isTextPreviewableFile(file: BridgeFile) {
-  const name = file.file_name.toLowerCase();
-  return (
-    file.file_type.startsWith("text/") ||
-    file.file_type.includes("json") ||
-    file.file_type.includes("javascript") ||
-    file.file_type.includes("typescript") ||
-    file.file_type.includes("xml") ||
-    [".md", ".txt", ".json", ".js", ".ts", ".tsx", ".jsx", ".css", ".html", ".sql", ".log", ".yaml", ".yml"].some((ext) =>
-      name.endsWith(ext),
-    )
-  );
 }
 
 function upsertById<T extends { id: string }>(items: T[], nextItem: T) {

@@ -23,6 +23,8 @@ import { GridBackground } from "@/components/grid-background";
 import { AuthButton } from "@/components/auth-button";
 import { cn, generateRoomCode } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SoundToggle } from "@/components/sound-toggle";
+import { playCopySound, playSendSound } from "@/lib/sound-effects";
 import { useAuthSession } from "@/lib/use-auth";
 import type { RoomView } from "@/lib/types";
 import { PwaInstallButton } from "@/components/pwa-install-button";
@@ -138,6 +140,7 @@ export default function HomePage() {
     setIsRandomizing(true);
     let steps = 0;
 
+    playCopySound();
     const intervalId = window.setInterval(() => {
       steps += 1;
       setSelectedRoomCode(generateRoomCode());
@@ -146,6 +149,7 @@ export default function HomePage() {
         window.clearInterval(intervalId);
         setSelectedRoomCode(generateRoomCode());
         setIsRandomizing(false);
+        playSendSound();
       }
     }, 55);
   }
@@ -157,6 +161,7 @@ export default function HomePage() {
       setError("Please enter a valid room code.");
       return;
     }
+    playCopySound();
     router.push(`/room/${code}`);
   }
 
@@ -167,7 +172,7 @@ export default function HomePage() {
       <div className="mx-auto grid w-full max-w-6xl gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="mx-auto flex w-full max-w-xl flex-col justify-center xl:max-w-none">
           <header className="mb-7 text-center">
-            <div className="flex items-center justify-end gap-2"><PwaInstallButton /><AuthButton /><ThemeToggle /></div>
+            <div className="flex items-center justify-end gap-2"><PwaInstallButton /><AuthButton /><SoundToggle /><ThemeToggle /></div>
             <TextBridgeMark />
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-th-text sm:text-5xl">TextBridge</h1>
             <p className="mt-2 text-sm text-th-text-muted">Send text and files between your devices instantly.</p>

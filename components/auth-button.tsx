@@ -11,14 +11,22 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
 
   if (!auth.session) {
     return (
-      <button
-        type="button"
-        onClick={() => void auth.signInWithGoogle()}
-        className="inline-flex items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-3 py-2 text-sm font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/60 hover:text-th-text"
-      >
-        <span className="grid size-5 place-items-center rounded-full bg-white font-sans text-xs font-bold text-neutral-900">G</span>
-        {compact ? "Sign in" : "Continue with Google"}
-      </button>
+      <div className="flex flex-col items-start gap-2">
+        <button
+          type="button"
+          onClick={() => void auth.signInWithGoogle()}
+          disabled={auth.signingIn}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-th-border bg-th-card/60 px-3 py-2 text-sm font-semibold text-th-text-sub transition hover:border-th-border-strong hover:bg-th-elevated/60 hover:text-th-text disabled:cursor-wait disabled:opacity-60"
+        >
+          <span className="grid size-5 place-items-center rounded-full bg-white font-sans text-xs font-bold text-neutral-900">G</span>
+          {auth.signingIn ? "Connecting…" : compact ? "Sign in" : "Continue with Google"}
+        </button>
+        {auth.authError ? (
+          <p role="alert" className="max-w-64 text-xs text-red-500">
+            Google sign-in failed: {auth.authError}
+          </p>
+        ) : null}
+      </div>
     );
   }
 

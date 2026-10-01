@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: RouteContext) {
 
 export async function POST(request: Request, { params }: RouteContext) {
   const { code } = await params;
-  const rateLimit = consumeRateLimit(`send-message:${getRequestAddress(request)}:${code.toUpperCase()}`, 120, 60_000);
+  const rateLimit = await consumeRateLimit(`send-message:${getRequestAddress(request)}:${code.toUpperCase()}`, 120, 60_000);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: "Too many messages. Please slow down." },

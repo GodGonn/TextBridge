@@ -92,6 +92,37 @@ textarea {
   animation: card-float 1.8s ease-in-out infinite;
 }
 
+.no-visible-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-visible-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
 @keyframes bridge-load {
   0% {
     transform: translateX(-115%);

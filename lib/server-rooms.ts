@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { localStore } from "@/lib/local-store";
+import { MAX_LOCAL_UPLOAD_BYTES, MAX_SUPABASE_UPLOAD_BYTES } from "@/lib/upload-limits";
 import type { BridgeFile, BridgeMessage, Room, RoomView, SenderIdentity } from "@/lib/types";
 import { detectMessageType, generateRoomCode } from "@/lib/utils";
 
@@ -443,6 +444,12 @@ export async function createRoomFile(
     return { ok: false as const, status: 423, error: "This room is locked by its owner" };
   }
 
+  const maxUploadBytes = access.storageMode === "local" ? MAX_LOCAL_UPLOAD_BYTES : MAX_SUPABASE_UPLOAD_BYTES;
+  if (upload.size > maxUploadBytes) {
+    const maxMegabytes = Math.round(maxUploadBytes / (1024 * 1024));
+    return { ok: false as const, status: 413, error: `Files in this room must be ${maxMegabytes} MB or smaller` };
+  }
+
   if (access.storageMode === "supabase" && serverSupabase) {
     const storagePath = `${access.room.id}/${crypto.randomUUID()}-${upload.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const { error: uploadError } = await serverSupabase.storage.from("textbridge-files").upload(storagePath, upload, {
@@ -482,10 +489,6 @@ export async function createRoomFile(
     } catch (caught) {
       return { ok: false as const, status: 500, error: caught instanceof Error ? caught.message : "Could not sign uploaded file" };
     }
-  }
-
-  if (upload.size > 10 * 1024 * 1024) {
-    return { ok: false as const, status: 400, error: "Local mode supports files up to 10 MB" };
   }
 
   const buffer = Buffer.from(await upload.arrayBuffer());

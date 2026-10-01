@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="th" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
+    <html lang="en" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <body>
         <ThemeProvider>{children}</ThemeProvider>
         <PwaRegistration />

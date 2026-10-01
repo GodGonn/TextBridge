@@ -9,7 +9,7 @@ type RouteContext = {
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { code } = await params;
-  const rateLimit = consumeRateLimit(`open-room:${getRequestAddress(request)}:${code.toUpperCase()}`, 30, 5 * 60_000);
+  const rateLimit = await consumeRateLimit(`open-room:${getRequestAddress(request)}:${code.toUpperCase()}`, 30, 5 * 60_000);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: "Too many room access attempts. Please try again later." },

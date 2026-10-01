@@ -5,7 +5,7 @@ import { consumeRateLimit, getRequestAddress } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
   try {
-    const rateLimit = consumeRateLimit(`create-room:${getRequestAddress(request)}`, 20, 10 * 60_000);
+    const rateLimit = await consumeRateLimit(`create-room:${getRequestAddress(request)}`, 20, 10 * 60_000);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: "Too many rooms created. Please try again later." },

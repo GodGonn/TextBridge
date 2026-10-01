@@ -7,7 +7,9 @@ export function cn(...inputs: ClassValue[]) {
 
 export function generateRoomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("")
+  const values = new Uint32Array(6)
+  globalThis.crypto.getRandomValues(values)
+  return Array.from(values, (value) => alphabet[value % alphabet.length]).join("")
 }
 
 export function formatTime(value: string | Date) {

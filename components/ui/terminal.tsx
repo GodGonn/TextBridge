@@ -428,13 +428,13 @@ export function Terminal({
     <div
       ref={containerRef}
       className={cn(
-        "mx-auto w-full max-w-xl px-4 font-mono text-xs",
+        "mx-auto min-w-0 w-full max-w-xl px-4 font-mono text-xs",
         className,
       )}
     >
       <div
         className={cn(
-          "overflow-hidden rounded-lg border border-th-border/80 bg-[rgb(var(--th-card))]/95 shadow-[0_24px_70px_rgba(15,23,42,0.14)] backdrop-blur-md dark:bg-[rgb(var(--th-card))]/98",
+          "w-full min-w-0 overflow-hidden rounded-lg border border-th-border/80 bg-[rgb(var(--th-card))]/95 shadow-[0_24px_70px_rgba(15,23,42,0.14)] backdrop-blur-md dark:bg-[rgb(var(--th-card))]/98",
           panelClassName,
         )}
       >
@@ -445,7 +445,7 @@ export function Terminal({
             <div className="h-3 w-3 rounded-full bg-amber-400/90 ring-1 ring-amber-500/20 transition-colors hover:bg-amber-500" />
             <div className="h-3 w-3 rounded-full bg-emerald-400/90 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500" />
           </div>
-          <div className="flex-1 text-center">
+          <div className="min-w-0 flex-1 text-center">
             <span className="truncate text-xs text-th-text-muted">
               {username} — bash
             </span>
@@ -457,12 +457,12 @@ export function Terminal({
         <div
           ref={contentRef}
           className={cn(
-            "no-visible-scrollbar h-80 overflow-y-auto bg-th-card p-4 font-mono",
+            "no-visible-scrollbar h-80 min-w-0 max-w-full overflow-x-hidden overflow-y-auto bg-th-card p-4 font-mono",
             contentClassName,
           )}
         >
           {lines.map((line, i) => (
-            <div key={i} className="leading-relaxed whitespace-pre-wrap">
+            <div key={i} className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               {line.type === "command" ? (
                 <span>
                   {prompt}
@@ -475,7 +475,7 @@ export function Terminal({
           ))}
 
           {phase === "typing" && (
-            <div className="leading-relaxed whitespace-pre-wrap">
+            <div className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               {prompt}
               <SyntaxHighlightedText text={currentText} />
               <span className="ml-0.5 inline-block h-4 w-2 bg-th-accent/70 align-middle" />
@@ -485,7 +485,7 @@ export function Terminal({
           {(phase === "done" ||
             phase === "pausing" ||
             phase === "outputting") && (
-            <div className="leading-relaxed whitespace-pre-wrap">
+            <div className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               {prompt}
               <span
                 className={cn(
